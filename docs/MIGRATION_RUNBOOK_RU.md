@@ -1,6 +1,6 @@
 # Перенос на новый VPS (минимум боли)
 
-Актуально на: 2026-02-03 18:20 UTC
+Актуально на: 2026-02-03 19:20 UTC
 
 
 Цель: при необходимости быстро “перетащить” прод на новый сервер без ручного шаманства.
@@ -51,11 +51,14 @@ TS=$(date -u +%Y%m%d_%H%M%S)
 docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /data/app.db /backup/app_${TS}.db"
 ```
 
-Восстановление (после остановки сервиса):
+Восстановление (после остановки сервиса). Выбери файл бэкапа и используй его явно:
+
 ```bash
 cd /opt/adaspeas
+ls -1 app_*.db
+DB_FILE="app_YYYYMMDD_HHMMSS.db"   # подставь реальное имя файла
 sudo systemctl stop adaspeas-bot
-docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /backup/app_${TS}.db /data/app.db"
+docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /backup/${DB_FILE} /data/app.db"
 sudo systemctl start adaspeas-bot
 ```
 
@@ -72,16 +75,23 @@ sudo systemctl stop adaspeas-bot
 ```
 
 ## Восстановление volume’ов на новом VPS
+Скопируй архивы в `/opt/adaspeas`, затем восстанови их, указывая файлы явно:
+
 ```bash
 cd /opt/adaspeas
 
+ls -1 app_data_*.tar.gz caddy_data_*.tar.gz caddy_config_*.tar.gz
+
+APP_ARCH="app_data_YYYYMMDD_HHMMSS.tar.gz"
+CADDY_DATA_ARCH="caddy_data_YYYYMMDD_HHMMSS.tar.gz"
+CADDY_CFG_ARCH="caddy_config_YYYYMMDD_HHMMSS.tar.gz"
+
 # app_data
-docker run --rm -v app_data:/data -v "$PWD":/backup alpine   sh -c "cd /data && rm -rf ./* && tar -xzf /backup/app_data_${TS}.tar.gz"
+docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${APP_ARCH}"
 
 # caddy
-docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine   sh -c "cd /data && rm -rf ./* && tar -xzf /backup/caddy_data_${TS}.tar.gz"
-
-docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine   sh -c "cd /data && rm -rf ./* && tar -xzf /backup/caddy_config_${TS}.tar.gz"
+docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_DATA_ARCH}"
+docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_CFG_ARCH}"
 ```
 
 5) Запуск:
@@ -102,4 +112,5 @@ sudo systemctl start adaspeas-bot
 | Дата/время (UTC) | Автор | Тип | Кратко что изменили | Причина/ссылка | Commit/PR |
 |---|---|---|---|---|---|
 | 2026-02-03 18:20 UTC | Nikolay | ops/doc | Добавлены таймстемпы, реальные ссылки на репо и быстрый бэкап SQLite | перенос/восстановление | |
+| 2026-02-03 19:20 UTC | Nikolay | ops/doc | Исправлены команды восстановления (явные имена файлов вместо TS-ловушки) | безошибочный restore | |
 
