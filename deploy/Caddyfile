@@ -12,4 +12,3 @@ bot.adaspeas.ru {
 
 	reverse_proxy bot:8080
 }
-

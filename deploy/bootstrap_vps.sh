@@ -97,4 +97,3 @@ echo "  1) edit $APP_DIR/.env"
 echo "  2) ensure DNS bot.adaspeas.ru -> this VPS"
 echo "  3) open ports 80/443"
 echo "  4) systemctl status adaspeas-bot"
-
