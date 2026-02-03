@@ -1,5 +1,7 @@
 # Production deploy (GitHub Actions -> VPS)
 
+Updated at: 2026-02-03 17:45 UTC
+
 This repo supports fully automated deploy to your VPS on every push to `main`.
 
 ## 1) DNS + firewall
@@ -40,12 +42,28 @@ Notes:
 - If your repo is public, you can omit `GHCR_PAT` and `GHCR_USER`.
 
 ## 4) Trigger deploy
-Push to `main`. Workflow `build-and-deploy` will build image, push to GHCR, then SSH and run:
+Push to `main`. Workflow `build-and-deploy` will build image, push to GHCR, then deploy.
 
+## 4.1) What the deploy workflow does
+On every push to `main`, GitHub Actions builds and pushes the image to GHCR, then SSHes into the VPS and executes:
+
+1) Sync the repository working copy (important for `docker-compose.prod.yml`, `Caddyfile`, scripts, docs):
+- `git fetch origin`
+- `git reset --hard origin/main`
+- `git clean -fd`
+
+2) Update containers:
 - `docker compose -f docker-compose.prod.yml pull`
 - `docker compose -f docker-compose.prod.yml up -d`
+- `docker image prune -f`
+
 
 ## 5) Verify
 - `https://bot.adaspeas.ru/health`
 - `https://bot.adaspeas.ru/metrics` (basic auth from .env)
+
+## Changes
+| Date/Time (UTC) | Author | Type | Summary | Reason/Link | Commit/PR |
+|---|---|---|---|---|---|
+| 2026-02-03 17:45 UTC | Nikolay | doc/ops | Documented mandatory repo sync on VPS and standardized timestamps | align with .github/workflows/deploy.yml | |
 
