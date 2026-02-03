@@ -1,11 +1,8 @@
 # Production deploy (GitHub Actions -> VPS)
 
-Updated at: 2026-02-03 18:20 UTC
+Updated at: 2026-02-03 19:10 UTC
 
 This repo supports fully automated deploy to your VPS on every push to `main`.
-
-Key principle:
-- The repository is the source of truth. The VPS must not drift from `origin/main` (except `.env`).
 
 ## 1) DNS + firewall
 - Point `bot.adaspeas.ru` to your VPS public IP.
@@ -47,7 +44,7 @@ Notes:
 ## 4) Trigger deploy
 Push to `main`. Workflow `build-and-deploy` will build image, push to GHCR, then deploy.
 
-## 5) What the deploy workflow does
+## 4.1) What the deploy workflow does
 On every push to `main`, GitHub Actions builds and pushes the image to GHCR, then SSHes into the VPS and executes:
 
 1) Sync the repository working copy (important for `docker-compose.prod.yml`, `Caddyfile`, scripts, docs):
@@ -58,10 +55,11 @@ On every push to `main`, GitHub Actions builds and pushes the image to GHCR, the
 2) Update containers:
 - `docker compose -f docker-compose.prod.yml pull`
 - `docker compose -f docker-compose.prod.yml up -d`
+- `docker compose -f docker-compose.prod.yml restart caddy`  (apply Caddyfile changes)
 - `docker image prune -f`
 
 
-## 6) Verify
+## 5) Verify
 - `https://bot.adaspeas.ru/health`
 - `https://bot.adaspeas.ru/metrics` (basic auth from .env)
 
@@ -69,5 +67,4 @@ On every push to `main`, GitHub Actions builds and pushes the image to GHCR, the
 | Date/Time (UTC) | Author | Type | Summary | Reason/Link | Commit/PR |
 |---|---|---|---|---|---|
 | 2026-02-03 17:45 UTC | Nikolay | doc/ops | Documented mandatory repo sync on VPS and standardized timestamps | align with .github/workflows/deploy.yml | |
-| 2026-02-03 18:20 UTC | Nikolay | doc/ops | Replaced placeholders with real repo URLs, clarified principle and numbering | usability/copy-paste | |
-
+| 2026-02-03 19:10 UTC | Nikolay | doc/ops | Added mandatory caddy restart after deploy; fixed real repo URLs; updated apply workflow note | prevent stale Caddyfile | |
