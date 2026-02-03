@@ -13,6 +13,7 @@
 
 ## Разработка и деплой
 
+- Контекст проекта и правила работы (включая работу через ChatGPT и команды применения архивов): `docs/CHAT_CONTEXT_RU.md`
 - Автоматизация разработки и деплоя (CI/CD, “автоматический режим”): `docs/AUTOMATION_RUNBOOK_RU.md`
 - Деплой на VPS: `docs/DEPLOYMENT.md`
 - Миграция/перенос на новый VPS: `docs/MIGRATION_RUNBOOK_RU.md`
