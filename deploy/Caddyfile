@@ -1,0 +1,14 @@
+{
+  email {$ACME_EMAIL}
+}
+
+bot.adaspeas.ru {
+  encode zstd gzip
+
+  @metrics path /metrics
+  basicauth @metrics {
+    {$METRICS_USER} {$METRICS_PASS}
+  }
+
+  reverse_proxy bot:8080
+}

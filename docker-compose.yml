@@ -1,0 +1,27 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  bot:
+    build: .
+    command: ["python", "-m", "adaspeas.bot.main"]
+    env_file: .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+
+  worker:
+    build: .
+    command: ["python", "-m", "adaspeas.worker.main"]
+    env_file: .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
