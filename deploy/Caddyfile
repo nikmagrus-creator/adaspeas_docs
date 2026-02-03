@@ -10,5 +10,8 @@ bot.adaspeas.ru {
 		{$METRICS_USER} {$METRICS_PASS}
 	}
 
+	@root path /
+	redir @root /health 302
+
 	reverse_proxy bot:8080
 }

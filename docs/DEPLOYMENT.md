@@ -1,6 +1,6 @@
 # Production deploy (GitHub Actions -> VPS)
 
-Updated at: 2026-02-03 18:10 UTC
+Updated at: 2026-02-03 18:20 UTC
 
 This repo supports fully automated deploy to your VPS on every push to `main`.
 
@@ -60,6 +60,7 @@ On every push to `main`, GitHub Actions builds and pushes the image to GHCR, the
 - `docker compose -f docker-compose.prod.yml up -d`
 - `docker image prune -f`
 
+
 ## 6) Verify
 - `https://bot.adaspeas.ru/health`
 - `https://bot.adaspeas.ru/metrics` (basic auth from .env)
@@ -68,4 +69,5 @@ On every push to `main`, GitHub Actions builds and pushes the image to GHCR, the
 | Date/Time (UTC) | Author | Type | Summary | Reason/Link | Commit/PR |
 |---|---|---|---|---|---|
 | 2026-02-03 17:45 UTC | Nikolay | doc/ops | Documented mandatory repo sync on VPS and standardized timestamps | align with .github/workflows/deploy.yml | |
-| 2026-02-03 18:10 UTC | Nikolay | doc/ops | Made bootstrap commands copy-pastable, clarified numbering and principles | reduce operator error | |
+| 2026-02-03 18:20 UTC | Nikolay | doc/ops | Replaced placeholders with real repo URLs, clarified principle and numbering | usability/copy-paste | |
+
