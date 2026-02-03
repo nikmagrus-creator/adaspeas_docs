@@ -18,6 +18,7 @@
 - Workflow деплоя: `.github/workflows/deploy.yml`
 - Прод-compose: `docker-compose.prod.yml`
 - Bootstrap VPS: `deploy/bootstrap_vps.sh`
+- Caddy конфиг: `deploy/Caddyfile`
 
 ## Запуск (локально)
 
@@ -26,22 +27,21 @@ cp .env.example .env
 docker compose up --build
 ```
 
-## Проверка (локально)
+## Проверка
 
+Локально (если поднимаешь bot/worker напрямую):
 - Bot health: http://localhost:8080/health
-- Bot metrics: http://localhost:8080/metrics
 - Worker health: http://localhost:8081/health
-- Worker metrics: http://localhost:8081/metrics
+
+Прод (через Caddy):
+- https://bot.adaspeas.ru/health (200)
+- https://bot.adaspeas.ru/metrics (401 без auth)
 
 ## Production deploy
 
-See `docs/DEPLOYMENT.md`.
+Смотри `docs/DEPLOYMENT.md`.
 
 ## Документация
 
 Смотри `docs/README.md` (единая точка входа, без зоопарка файлов).
 Сейвпоинт и правила работы: `docs/CHAT_CONTEXT_RU.md`.
-
-CI trigger
-
-deploy sync check

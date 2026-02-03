@@ -1,7 +1,6 @@
 # Перенос на новый VPS (минимум боли)
 
-Актуально на: 2026-02-03 19:20 UTC
-
+Актуально на: 2026-02-03 19:25 UTC
 
 Цель: при необходимости быстро “перетащить” прод на новый сервер без ручного шаманства.
 
@@ -21,7 +20,7 @@
 cd /opt/adaspeas
 ```
 
-Сделать архивы volume’ов (tar.gz в текущей папке). Рекомендуется именовать с UTC-временем:
+Рекомендуется именовать бэкапы с UTC-временем:
 ```bash
 TS=$(date -u +%Y%m%d_%H%M%S)
 ```
@@ -29,36 +28,35 @@ TS=$(date -u +%Y%m%d_%H%M%S)
 Сделать архивы volume’ов:
 ```bash
 # app_data (SQLite)
-docker run --rm -v app_data:/data -v "$PWD":/backup alpine   sh -c "cd /data && tar -czf /backup/app_data_${TS}.tar.gz ."
+docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cd /data && tar -czf /backup/app_data_${TS}.tar.gz ."
 
 # caddy certificates/state
-docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine   sh -c "cd /data && tar -czf /backup/caddy_data_${TS}.tar.gz ."
-
-docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine   sh -c "cd /data && tar -czf /backup/caddy_config_${TS}.tar.gz ."
+docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine sh -c "cd /data && tar -czf /backup/caddy_data_${TS}.tar.gz ."
+docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine sh -c "cd /data && tar -czf /backup/caddy_config_${TS}.tar.gz ."
 
 # опционально redis
-docker run --rm -v redis_data:/data -v "$PWD":/backup alpine   sh -c "cd /data && tar -czf /backup/redis_data_${TS}.tar.gz ."
+docker run --rm -v redis_data:/data -v "$PWD":/backup alpine sh -c "cd /data && tar -czf /backup/redis_data_${TS}.tar.gz ."
 ```
 
 Скачать архивы на локальную машину или сразу на новый VPS (scp/rsync).
 
 ## Быстрый бэкап SQLite (только файл app.db)
 Если нужно быстро снять только базу (без остальных volume’ов):
-
 ```bash
 cd /opt/adaspeas
 TS=$(date -u +%Y%m%d_%H%M%S)
 docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /data/app.db /backup/app_${TS}.db"
 ```
 
-Восстановление (после остановки сервиса). Выбери файл бэкапа и используй его явно:
-
+Восстановление (после остановки сервиса):
 ```bash
 cd /opt/adaspeas
-ls -1 app_*.db
-DB_FILE="app_YYYYMMDD_HHMMSS.db"   # подставь реальное имя файла
 sudo systemctl stop adaspeas-bot
-docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /backup/${DB_FILE} /data/app.db"
+
+# выбери нужный файл (самый свежий)
+DB_FILE="$(ls -1t app_*.db | head -n1)"
+docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cp /backup/$DB_FILE /data/app.db"
+
 sudo systemctl start adaspeas-bot
 ```
 
@@ -75,23 +73,20 @@ sudo systemctl stop adaspeas-bot
 ```
 
 ## Восстановление volume’ов на новом VPS
-Скопируй архивы в `/opt/adaspeas`, затем восстанови их, указывая файлы явно:
-
 ```bash
 cd /opt/adaspeas
 
-ls -1 app_data_*.tar.gz caddy_data_*.tar.gz caddy_config_*.tar.gz
-
-APP_ARCH="app_data_YYYYMMDD_HHMMSS.tar.gz"
-CADDY_DATA_ARCH="caddy_data_YYYYMMDD_HHMMSS.tar.gz"
-CADDY_CFG_ARCH="caddy_config_YYYYMMDD_HHMMSS.tar.gz"
+# выбрать архивы (по умолчанию самые свежие)
+APP_DATA_TGZ="$(ls -1t app_data_*.tar.gz | head -n1)"
+CADDY_DATA_TGZ="$(ls -1t caddy_data_*.tar.gz | head -n1)"
+CADDY_CFG_TGZ="$(ls -1t caddy_config_*.tar.gz | head -n1)"
 
 # app_data
-docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${APP_ARCH}"
+docker run --rm -v app_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${APP_DATA_TGZ}"
 
 # caddy
-docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_DATA_ARCH}"
-docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_CFG_ARCH}"
+docker run --rm -v caddy_data:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_DATA_TGZ}"
+docker run --rm -v caddy_config:/data -v "$PWD":/backup alpine sh -c "cd /data && rm -rf ./* && tar -xzf /backup/${CADDY_CFG_TGZ}"
 ```
 
 5) Запуск:
@@ -112,5 +107,4 @@ sudo systemctl start adaspeas-bot
 | Дата/время (UTC) | Автор | Тип | Кратко что изменили | Причина/ссылка | Commit/PR |
 |---|---|---|---|---|---|
 | 2026-02-03 18:20 UTC | Nikolay | ops/doc | Добавлены таймстемпы, реальные ссылки на репо и быстрый бэкап SQLite | перенос/восстановление | |
-| 2026-02-03 19:20 UTC | Nikolay | ops/doc | Исправлены команды восстановления (явные имена файлов вместо TS-ловушки) | безошибочный restore | |
-
+| 2026-02-03 19:25 UTC | Nikolay | ops/doc | Убрана ловушка с TS при восстановлении: выбор файлов через ls -t; приведён единый формат | надёжность/runbook | |
