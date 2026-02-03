@@ -1,6 +1,6 @@
 # Production deploy (GitHub Actions -> VPS)
 
-Updated at: 2026-02-03 19:10 UTC
+Updated at: 2026-02-03 19:35 UTC
 
 This repo supports fully automated deploy to your VPS on every push to `main`.
 
@@ -63,8 +63,38 @@ On every push to `main`, GitHub Actions builds and pushes the image to GHCR, the
 - `https://bot.adaspeas.ru/health`
 - `https://bot.adaspeas.ru/metrics` (basic auth from .env)
 
+
+## Required .env checklist
+
+These variables are required on the VPS in `/opt/adaspeas/.env` (do **not** commit real values).
+
+Application (bot/worker):
+- `BOT_TOKEN` — Telegram bot token
+- `YANDEX_OAUTH_TOKEN` — access token for Yandex.Disk API
+- `YANDEX_BASE_PATH` — base folder path (default: `/Adaspeas`)
+- `SQLITE_PATH` — SQLite DB file path (production: `/data/app.db`)
+- `REDIS_URL` — Redis connection string (default: `redis://redis:6379/0`)
+
+Production / Caddy:
+- `ACME_EMAIL` — email for Let's Encrypt
+- `METRICS_USER`, `METRICS_PASS` — Basic Auth for `/metrics`
+
+Images:
+- `IMAGE` — docker image tag to deploy (e.g. `ghcr.io/nikmagrus-creator/adaspeas_docs:latest`)
+
+Quick validation on the VPS:
+```bash
+cd /opt/adaspeas
+test -f .env || { echo ".env missing"; exit 1; }
+for k in BOT_TOKEN YANDEX_OAUTH_TOKEN SQLITE_PATH REDIS_URL ACME_EMAIL METRICS_USER METRICS_PASS IMAGE; do
+  v="$(grep -E "^$k=" .env | tail -n1 | cut -d= -f2-)"
+  test -n "$v" || { echo "Missing/empty $k"; exit 1; }
+done
+```
+
 ## Changes
 | Date/Time (UTC) | Author | Type | Summary | Reason/Link | Commit/PR |
 |---|---|---|---|---|---|
+| 2026-02-03 19:35 UTC | Nikolay | ops/doc | Added required .env checklist; aligned env variables | env validation | |
 | 2026-02-03 17:45 UTC | Nikolay | doc/ops | Documented mandatory repo sync on VPS and standardized timestamps | align with .github/workflows/deploy.yml | |
 | 2026-02-03 19:10 UTC | Nikolay | doc/ops | Added mandatory caddy restart after deploy; fixed real repo URLs; updated apply workflow note | prevent stale Caddyfile | |

@@ -118,6 +118,22 @@ jobs:
             git reset --hard origin/main
             git clean -fd
 
+            # validate required env vars (fail fast before pulling/up)
+            if [ ! -f .env ]; then
+              echo "Missing .env in $APP_DIR"
+              exit 3
+            fi
+
+            required_vars="BOT_TOKEN YANDEX_OAUTH_TOKEN SQLITE_PATH REDIS_URL ACME_EMAIL METRICS_USER METRICS_PASS IMAGE"
+            for k in $required_vars; do
+              v="$(grep -E "^${k}=" .env | tail -n1 | cut -d= -f2- || true)"
+              if [ -z "$v" ]; then
+                echo "Missing or empty env var: $k"
+                exit 3
+              fi
+            done
+
+
             if [ -n "${GHCR_PAT:-}" ]; then
               echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-${{ github.actor }}}" --password-stdin
             fi
