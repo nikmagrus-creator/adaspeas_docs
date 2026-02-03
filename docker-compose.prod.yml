@@ -37,6 +37,12 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      METRICS_USER: ${METRICS_USER}
+      METRICS_PASS: ${METRICS_PASS}
     ports:
       - "80:80"
       - "443:443"
