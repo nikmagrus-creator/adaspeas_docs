@@ -22,6 +22,53 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Docs policy check (timestamps + no doc sprawl)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          echo "Checking docs policy for changes: $BEFORE..$AFTER"
+
+          changed_files="$(git diff --name-only "$BEFORE" "$AFTER" || true)"
+          added_docs="$(git diff --name-status "$BEFORE" "$AFTER" | awk '$1=="A" && $2 ~ /^docs\// {print $2}' || true)"
+
+          # No new docs files unless ADR or ops runbook
+          if [ -n "${added_docs}" ]; then
+            bad="$(echo "${added_docs}" | grep -Ev '^(docs/handbook/03_arch/ADR/|docs/handbook/04_ops/)' || true)"
+            if [ -n "${bad}" ]; then
+              echo "ERROR: New docs files are not allowed (except ADR/runbook)."
+              echo "${bad}"
+              exit 1
+            fi
+          fi
+
+          # Living docs must have timestamp + change log table
+          living_docs="docs/CHAT_CONTEXT_RU.md docs/AUTOMATION_RUNBOOK_RU.md docs/DEPLOYMENT.md docs/MIGRATION_RUNBOOK_RU.md"
+
+          for f in ${living_docs}; do
+            if echo "${changed_files}" | grep -qx "${f}"; then
+              echo "Validating living doc: ${f}"
+              if [ "${f}" = "docs/DEPLOYMENT.md" ]; then
+                grep -q '^Updated at: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
+                grep -q '^## Changes' "${f}"
+              else
+                grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
+                grep -q '^## История изменений' "${f}"
+              fi
+
+              # Table must contain at least one data row with UTC
+              if ! grep -E '^[|].*UTC.*[|]' "${f}" >/dev/null; then
+                echo "ERROR: ${f} must contain at least one history row in the table."
+                exit 1
+              fi
+            fi
+          done
+
+          echo "Docs policy check passed."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
