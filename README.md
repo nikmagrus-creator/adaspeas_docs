@@ -28,3 +28,5 @@ See `docs/DEPLOYMENT.md`.
 
 ## Документация
 Смотри `docs/README.md` (единая точка входа, без зоопарка файлов).
+
+CI trigger
