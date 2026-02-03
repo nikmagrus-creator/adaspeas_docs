@@ -65,12 +65,18 @@ jobs:
               exit 2
             fi
             cd "$APP_DIR"
+
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
+
             if [ -n "${GHCR_PAT:-}" ]; then
               echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-${{ github.actor }}}" --password-stdin
             fi
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
+
     env:
       GHCR_USER: ${{ secrets.GHCR_USER }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
