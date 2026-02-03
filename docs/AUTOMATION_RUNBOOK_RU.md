@@ -1,6 +1,6 @@
 # Автоматический режим разработки и выката (GitHub → VPS)
 
-Актуально на: 2026-02-03 19:25 UTC
+Актуально на: 2026-02-03 19:35 UTC
 
 Цель: один раз настроить инфраструктуру, после чего любой push в `main` автоматически:
 1) собирает Docker image,
@@ -14,15 +14,12 @@
 ## Как это работает
 - GitHub Actions: `.github/workflows/deploy.yml`
   - Build + push: `ghcr.io/nikmagrus-creator/adaspeas_docs:latest` и `:SHA`
-  - Deploy: SSH на VPS и:
-    - sync repo (fetch/reset/clean),
-    - `docker compose pull && docker compose up -d`,
-    - `docker compose restart caddy` (чтобы применить изменения `deploy/Caddyfile`).
+  - Deploy: SSH на VPS и `docker compose pull && docker compose up -d && docker compose restart caddy`
 
 - Прод-стек: `docker-compose.prod.yml`
   - `bot`, `worker` используют один и тот же image (`${IMAGE}`)
   - данные SQLite лежат в volume `app_data` (`/data/app.db`)
-  - Caddy обслуживает `https://bot.adaspeas.ru` и закрывает `/metrics` basic auth
+  - Caddy обслуживает `https://bot.adaspeas.ru`
 
 ## Что считается “готовым к автодеплою”
 Обязательный минимум:
@@ -69,7 +66,6 @@ docker compose -f docker-compose.prod.yml logs -f --tail=200 caddy
 Ручной деплой (если GitHub временно сломан):
 ```bash
 cd /opt/adaspeas
-git fetch origin && git reset --hard origin/main && git clean -fd
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml restart caddy
@@ -94,7 +90,20 @@ docker compose -f docker-compose.prod.yml restart caddy
 
 ## Режим работы (чат → пакет правок → симуляции → архив → пуш)
 
-Источник “памяти проекта”: `docs/CHAT_CONTEXT_RU.md` (там же путь к архивам и команда распаковки без `git diff`).
+Цель: сохранить контекст между сессиями и не превращать чат в ручное дифф-ревью.
+
+Правила:
+- В чате не публикуем код/диффы для внесения правок. Здесь обсуждаем план и список файлов.
+- Изменения готовятся “пакетом” (связанный набор правок), затем прогоняются проверки/симуляции.
+- Архив для замены в репозитории и команда на push выдаются только по явной команде.
+- Документы не плодим без необходимости (см. `docs/README.md`).
+- Секреты/токены никогда не вставляются в чат и не попадают в git.
+
+Локальная среда (операторская):
+- ОС: Linux Mint
+- Локальный репозиторий: `/projects/adaspeas`
+
+Источник “памяти проекта”: `docs/CHAT_CONTEXT_RU.md`.
 
 ## Где хранить “память проекта”
 - Этот файл: `docs/AUTOMATION_RUNBOOK_RU.md`
@@ -105,4 +114,4 @@ docker compose -f docker-compose.prod.yml restart caddy
 | Дата/время (UTC) | Автор | Тип | Кратко что изменили | Причина/ссылка | Commit/PR |
 |---|---|---|---|---|---|
 | 2026-02-03 17:45 UTC | Nikolay | doc/ops | Зафиксирован режим работы (архив/пуш по команде), добавлены таймстемпы | процесс/дисциплина | |
-| 2026-02-03 19:25 UTC | Nikolay | doc/ops | Убраны плейсхолдеры OWNER/REPO, добавлен restart caddy в ручной деплой/роллбек, ссылка на CHAT_CONTEXT | консистентность/ops | |
+| 2026-02-03 19:35 UTC | Nikolay | doc/ops | Убраны плейсхолдеры OWNER/REPO; уточнён ручной деплой/роллбек с restart caddy | консистентность/runbook | |
