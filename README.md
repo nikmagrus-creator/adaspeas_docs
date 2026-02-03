@@ -30,3 +30,5 @@ See `docs/DEPLOYMENT.md`.
 Смотри `docs/README.md` (единая точка входа, без зоопарка файлов).
 
 CI trigger
+
+deploy sync check
