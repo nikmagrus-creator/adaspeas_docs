@@ -55,7 +55,8 @@ async def main() -> None:
     except Exception:
         # Never fail bot startup because of Telegram UI cosmetics
         pass
-db = await db_mod.connect(settings.sqlite_path)
+
+    db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
 
     r = await get_redis(settings.redis_url)
