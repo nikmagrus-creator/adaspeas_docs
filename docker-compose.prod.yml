@@ -6,7 +6,8 @@ services:
       - redis_data:/data
 
   bot:
-    image: ${IMAGE}
+    image: adaspeas-app:latest
+    build: .
     restart: unless-stopped
     env_file:
       - .env
@@ -20,7 +21,8 @@ services:
       - "8080"
 
   worker:
-    image: ${IMAGE}
+    image: adaspeas-app:latest
+    build: .
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.worker.main"]
     env_file:

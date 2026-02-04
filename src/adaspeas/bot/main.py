@@ -6,7 +6,7 @@ import uuid
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, BotCommand
 from aiohttp import web
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -45,14 +45,17 @@ async def main() -> None:
     dp = Dispatcher()
 
     # Publish command list in Telegram UI
-    await bot.set_my_commands([
-        ("start", "Показать справку"),
-        ("categories", "Каталог из Яндекс.Диска"),
-        ("list", "Тестовый каталог (SQLite)"),
-        ("download", "Скачать файл по id из /list"),
-    ])
-
-    db = await db_mod.connect(settings.sqlite_path)
+    try:
+        await bot.set_my_commands([
+            BotCommand(command='start', description='Показать справку'),
+            BotCommand(command='categories', description='Каталог из Яндекс.Диска'),
+            BotCommand(command='list', description='Тестовый каталог (SQLite)'),
+            BotCommand(command='download', description='Скачать файл по id из /list')
+        ])
+    except Exception:
+        # Never fail bot startup because of Telegram UI cosmetics
+        pass
+db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
 
     r = await get_redis(settings.redis_url)
