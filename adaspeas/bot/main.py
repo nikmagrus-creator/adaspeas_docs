@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import uuid
 
@@ -44,17 +43,16 @@ async def main() -> None:
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
-
     # Publish command list in Telegram UI
     try:
         await bot.set_my_commands([
-            BotCommand(command='start', description='Показать справку'),
-            BotCommand(command='categories', description='Каталог из Яндекс.Диска'),
-            BotCommand(command='list', description='Тестовый каталог (SQLite)'),
-            BotCommand(command='download', description='Скачать файл по id из /list'),
+            BotCommand(command="start", description="Показать справку"),
+            BotCommand(command="categories", description="Каталог из Яндекс.Диска"),
+            BotCommand(command="list", description="Тестовый каталог (SQLite)"),
+            BotCommand(command="download", description="Скачать файл по id из /list"),
         ])
     except Exception:
-        logging.exception("Failed to set bot commands")
+        log.exception("Failed to set bot commands")
 
     db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
