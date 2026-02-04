@@ -1,6 +1,6 @@
 # Техническая спецификация: Adaspeas (консолидировано)
 
-Актуально на: 2026-02-04 12:00 UTC
+Актуально на: 2026-02-04 18:00 UTC
 
 Цель: один источник правды по устройству системы и публичным контрактам. Ops-процедуры — в `docs/OPS_RUNBOOK_RU.md`.
 
@@ -47,7 +47,28 @@ HTTP:
 - Никаких ручных правок на VPS кроме `.env` (иначе git перестаёт быть источником истины).
 - Конфиги деплоя/прокси/compose версионируются в git.
 
+
+## 6) Карта реализации (Implementation Map)
+Эта секция нужна для CI-проверки: если меняется реализация/инфраструктура, обновляйте карту.
+
+- Команды Telegram и маршрутизация:
+  - `/start`, `/categories`, `/seed`, `/list`, `/download`: `src/adaspeas/bot/main.py`
+  - Inline-навигация по папкам/файлам (callback): `src/adaspeas/bot/*` (handlers/routers, если выделены)
+- Yandex Disk (листинг каталога, получение ссылок):
+  - Клиент API и `list_dir(path)`/download-link: `src/adaspeas/storage/yandex.py` (или эквивалентный модуль storage)
+  - Базовый путь каталога: env `YANDEX_BASE_PATH` (пример: `/Zkvpr`)
+- Очередь и жизненный цикл job:
+  - Публикация job_id в Redis: `src/adaspeas/*` (bot → redis)
+  - Воркеры, статусы, ретраи/идемпотентность: `src/adaspeas/worker/*`
+  - Хранилище статусов/каталога: `SQLITE_PATH` (SQLite) + `src/adaspeas/db/*`
+- Infra / deploy:
+  - Prod compose: `docker-compose.prod.yml`
+  - Caddy, Basic Auth на `/metrics`: `Caddyfile`/секция caddy в compose
+  - Переменные, обязательные для deploy workflow: `BOT_TOKEN`, `YANDEX_OAUTH_TOKEN`, `SQLITE_PATH`, `REDIS_URL`, `ACME_EMAIL`, `METRICS_USER`, `METRICS_PASS`, `IMAGE`
+
+
 ## История изменений
 | Дата/время (UTC) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
 | 2026-02-04 12:00 UTC | ChatGPT | doc | Выделены публичные контракты в стиле MUST/SHOULD | |
+| 2026-02-04 18:00 UTC | ChatGPT | doc | Добавлена карта реализации для CI (Implementation Map) + зафиксированы обязательные env для deploy | |
