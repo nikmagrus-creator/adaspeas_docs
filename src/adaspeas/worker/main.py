@@ -5,6 +5,7 @@ import tempfile
 
 from aiohttp import web
 from aiogram import Bot
+from aiogram.types import FSInputFile
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import structlog
 
@@ -58,7 +59,7 @@ async def process_one(settings: Settings, bot: Bot, yd: YandexDiskClient, db, r,
                 tmp.write(chunk)
             tmp.flush()
 
-            await bot.send_document(chat_id=job["tg_chat_id"], document=tmp.name, caption=item["title"])
+            await bot.send_document(chat_id=job["tg_chat_id"], document=FSInputFile(tmp.name), caption=item["title"])
 
         await db_mod.set_job_state(db, job_id, "succeeded")
         JOBS_SUCCEEDED.inc()
