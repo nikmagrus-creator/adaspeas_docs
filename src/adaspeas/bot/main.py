@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import uuid
 
 from aiogram import Bot, Dispatcher, F
@@ -42,12 +41,16 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
-    # Fail fast on missing storage credentials only when needed.
-    if settings.storage_mode.strip().lower() == "yandex" and not settings.yandex_oauth_token:
-        raise RuntimeError("Storage mode 'yandex' requires YANDEX_OAUTH_TOKEN. Set STORAGE_MODE=local for local runs.")
-
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
+
+    # Publish command list in Telegram UI
+    await bot.set_my_commands([
+        ("start", "Показать справку"),
+        ("categories", "Каталог из Яндекс.Диска"),
+        ("list", "Тестовый каталог (SQLite)"),
+        ("download", "Скачать файл по id из /list"),
+    ])
 
     db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
@@ -61,7 +64,8 @@ async def main() -> None:
         await m.answer(
             "Привет. Это Adaspeas MVP.\n\n"
             "Команды:\n"
-            "/seed - (admin) добавить тестовый файл в каталог\n"
+            "/categories - показать каталог из Яндекс.Диска (/Zkvpr)\n"
+            "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
             "/list - показать тестовый каталог\n"
             "/download <id> - поставить задачу на отправку файла"
         )
@@ -72,25 +76,6 @@ async def main() -> None:
         if settings.admin_ids_set() and m.from_user.id not in settings.admin_ids_set():
             await m.answer("Недостаточно прав.")
             return
-        demo_path = "/demo.pdf"
-
-        # In local mode, ensure a demo file exists inside the shared /data volume.
-        if settings.storage_mode.strip().lower() == "local":
-            root = Path(settings.local_storage_root)
-            root.mkdir(parents=True, exist_ok=True)
-            demo_file = root / demo_path.lstrip("/")
-            if not demo_file.exists():
-                # Small valid-ish PDF so Telegram previews don't get weird.
-                demo_file.write_bytes(
-                    b"%PDF-1.4\n1 0 obj<<>>endobj\n"
-                    b"2 0 obj<< /Type /Catalog /Pages 3 0 R >>endobj\n"
-                    b"3 0 obj<< /Type /Pages /Kids [4 0 R] /Count 1 >>endobj\n"
-                    b"4 0 obj<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>endobj\n"
-                    b"5 0 obj<< /Length 44 >>stream\nBT /F1 12 Tf 20 100 Td (Adaspeas demo) Tj ET\nendstream endobj\n"
-                    b"xref\n0 6\n0000000000 65535 f \n"
-                    b"trailer<< /Root 2 0 R /Size 6 >>\nstartxref\n0\n%%EOF\n"
-                )
-
         # Create a single demo item if not exists
         await db.execute(
             """
@@ -98,11 +83,10 @@ async def main() -> None:
             VALUES (?, 'file', ?, ?)
             ON CONFLICT(path) DO NOTHING
             """,
-            (demo_path, "Demo PDF", demo_path),
+            ("/demo.pdf", "Demo PDF", "/demo.pdf"),
         )
         await db.commit()
-        mode = settings.storage_mode.strip().lower()
-        await m.answer(f"Ок. Добавил {demo_path} как тестовый элемент каталога. storage_mode={mode}")
+        await m.answer("Ок. Добавил /demo.pdf как тестовый элемент каталога.")
 
     @dp.message(Command("list"))
     async def list_catalog(m: Message) -> None:
