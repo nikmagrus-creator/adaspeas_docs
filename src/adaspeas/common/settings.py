@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Storage
     yandex_oauth_token: str
-    yandex_base_path: str = "/Adaspeas"
+    yandex_base_path: str = "/Zkvpr"
 
     # DB
     sqlite_path: str = "/data/adaspeas.sqlite"
