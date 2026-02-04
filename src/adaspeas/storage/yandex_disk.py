@@ -24,6 +24,24 @@ class YandexDiskClient:
                 raise RuntimeError("Yandex Disk: missing href")
             return str(href)
 
+
+    async def list_dir(self, path: str) -> list[dict]:
+        """List items in a Yandex.Disk folder (one level).
+
+        Returns raw item dicts from Yandex API (name, path, type, size, modified...).
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{self._base}/resources",
+                headers=self._headers,
+                params={"path": path, "limit": 200, "offset": 0},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            embedded = data.get("_embedded") or {}
+            items = embedded.get("items") or []
+            return list(items)
+
     async def stream_download(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
         url = await self.get_download_url(path)
         async with httpx.AsyncClient(timeout=None) as client:

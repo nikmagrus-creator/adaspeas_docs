@@ -37,7 +37,7 @@ jobs:
 
           # No new docs files unless ADR or ops runbook
           if [ -n "${added_docs}" ]; then
-            bad="$(echo "${added_docs}" | grep -Ev '^(docs/handbook/03_arch/ADR/|docs/handbook/04_ops/)' || true)"
+            bad="$(echo "${added_docs}" | grep -Ev '^(docs/adr/|docs/handbook/)' || true)"
             if [ -n "${bad}" ]; then
               echo "ERROR: New docs files are not allowed (except ADR/runbook)."
               echo "${bad}"
@@ -46,14 +46,14 @@ jobs:
           fi
 
           # Living docs must have timestamp + change log table
-          living_docs="docs/CHAT_CONTEXT_RU.md docs/AUTOMATION_RUNBOOK_RU.md docs/DEPLOYMENT.md docs/MIGRATION_RUNBOOK_RU.md"
+          living_docs="docs/INDEX_RU.md docs/WORKFLOW_CONTRACT_RU.md docs/PRD_RU.md docs/TECH_SPEC_RU.md docs/OPS_RUNBOOK_RU.md docs/ROADMAP_RU.md docs/DOCS_RATIONALE_RU.md"
 
           for f in ${living_docs}; do
             if echo "${changed_files}" | grep -qx "${f}"; then
               echo "Validating living doc: ${f}"
-              if [ "${f}" = "docs/DEPLOYMENT.md" ]; then
-                grep -q '^Updated at: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
-                grep -q '^## Changes' "${f}"
+              if [ "${f}" = "docs/INDEX_RU.md" ] || [ "${f}" = "docs/DOCS_RATIONALE_RU.md" ] || [ "${f}" = "docs/WORKFLOW_CONTRACT_RU.md" ] || [ "${f}" = "docs/PRD_RU.md" ] || [ "${f}" = "docs/TECH_SPEC_RU.md" ] || [ "${f}" = "docs/OPS_RUNBOOK_RU.md" ] || [ "${f}" = "docs/ROADMAP_RU.md" ]; then
+                grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
+                grep -q '^## История изменений' "${f}"
               else
                 grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
                 grep -q '^## История изменений' "${f}"

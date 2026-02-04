@@ -179,3 +179,31 @@ async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
         "title": row[3],
         "yandex_id": row[4],
     }
+
+
+async def upsert_catalog_item(
+    db: aiosqlite.Connection,
+    path: str,
+    kind: str,
+    title: str,
+    yandex_id: str | None = None,
+    size_bytes: int | None = None,
+) -> int:
+    """Insert/update catalog item by unique path. Returns item id."""
+    await db.execute(
+        """
+        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(path) DO UPDATE SET
+          kind=excluded.kind,
+          title=excluded.title,
+          yandex_id=excluded.yandex_id,
+          size_bytes=excluded.size_bytes,
+          updated_at=datetime('now')
+        """,
+        (path, kind, title, yandex_id, size_bytes),
+    )
+    await db.commit()
+    cur = await db.execute("SELECT id FROM catalog_items WHERE path=?", (path,))
+    row = await cur.fetchone()
+    return int(row[0])

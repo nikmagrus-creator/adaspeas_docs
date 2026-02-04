@@ -15,6 +15,7 @@ from adaspeas.common.logging import setup_logging
 from adaspeas.common.settings import Settings
 from adaspeas.common import db as db_mod
 from adaspeas.common.queue import get_redis, enqueue
+from adaspeas.storage import make_storage_client
 
 log = structlog.get_logger()
 
@@ -74,12 +75,91 @@ async def main() -> None:
             "/download <id> - поставить задачу на отправку файла"
         )
 
+
+    @dp.message(Command("categories"))
+    async def categories(m: Message) -> None:
+        REQ_TOTAL.labels(command="categories").inc()
+        # Sync listing from storage into SQLite and show top level.
+        try:
+            storage = make_storage_client(settings)
+        except Exception as e:
+            await m.answer(f"Хранилище не настроено: {e}")
+            return
+
+        base = (settings.yandex_base_path or "/").strip() if getattr(settings, "storage_mode", "yandex") != "local" else "/"
+        items: list[tuple[str,str,str,str|None,int|None]] = []
+
+        if getattr(settings, "storage_mode", "yandex") == "local":
+            # local: list files under local_storage_root
+            import os as _os
+            root_dir = getattr(settings, "local_storage_root", "/data/storage")
+            try:
+                for name in sorted(_os.listdir(root_dir))[:200]:
+                    full = _os.path.join(root_dir, name)
+                    if _os.path.isdir(full):
+                        kind = "folder"
+                        size = None
+                    else:
+                        kind = "file"
+                        size = _os.path.getsize(full)
+                    path = "/" + name
+                    items.append((path, kind, name, path, size))
+            except Exception as e:
+                await m.answer(f"Не удалось прочитать локальное хранилище: {e}")
+                return
+        else:
+            # yandex: list one level under base path
+            try:
+                raw_items = await storage.list_dir(base)  # type: ignore[attr-defined]
+            except Exception as e:
+                await m.answer(f"Не удалось получить каталог из Яндекс.Диска: {e}")
+                return
+
+            for it in raw_items:
+                kind = "folder" if it.get("type") == "dir" else "file"
+                path = it.get("path") or it.get("name") or ""
+                title = it.get("name") or path
+                yid = path
+                size = it.get("size")
+                items.append((path, kind, title, yid, size))
+
+        # Upsert into DB
+        for path, kind, title, yid, size in items:
+            if not path:
+                continue
+            await db_mod.upsert_catalog_item(db, path=path, kind=kind, title=title, yandex_id=yid, size_bytes=size)
+
+        # Show first 50 entries
+        cur = await db.execute(
+            "SELECT id, kind, title, path FROM catalog_items ORDER BY kind DESC, title LIMIT 50"
+        )
+        rows = await cur.fetchall()
+        if not rows:
+            await m.answer("Каталог пуст.")
+            return
+
+        text = "Каталог (первые 50):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]} ({r[3]})" for r in rows])
+        await m.answer(text)
+
     @dp.message(Command("seed"))
     async def seed(m: Message) -> None:
         REQ_TOTAL.labels(command="seed").inc()
         if settings.admin_ids_set() and m.from_user.id not in settings.admin_ids_set():
             await m.answer("Недостаточно прав.")
             return
+
+        # In local mode, create a tiny demo.pdf once.
+        if getattr(settings, "storage_mode", "yandex") == "local":
+            import os as _os
+            root_dir = getattr(settings, "local_storage_root", "/data/storage")
+            _os.makedirs(root_dir, exist_ok=True)
+            demo_path = _os.path.join(root_dir, "demo.pdf")
+            if not _os.path.exists(demo_path):
+                # Minimal PDF file (enough for most viewers)
+                payload = b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 44>>stream\nBT /F1 18 Tf 20 100 Td (Adaspeas demo) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000062 00000 n \n0000000117 00000 n \n0000000241 00000 n \n0000000334 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n404\n%%EOF\n"
+                with open(demo_path, "wb") as f:
+                    f.write(payload)
+
         # Create a single demo item if not exists
         await db.execute(
             """
