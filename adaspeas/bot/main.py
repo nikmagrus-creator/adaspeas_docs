@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import uuid
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -16,6 +16,7 @@ from adaspeas.common.logging import setup_logging
 from adaspeas.common.settings import Settings
 from adaspeas.common import db as db_mod
 from adaspeas.common.queue import get_redis, enqueue
+from adaspeas.storage.yandex_disk import YandexDiskClient
 
 log = structlog.get_logger()
 
@@ -42,10 +43,6 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
-    # Fail fast on missing storage credentials only when needed.
-    if settings.storage_mode.strip().lower() == "yandex" and not settings.yandex_oauth_token:
-        raise RuntimeError("Storage mode 'yandex' requires YANDEX_OAUTH_TOKEN. Set STORAGE_MODE=local for local runs.")
-
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
@@ -53,6 +50,52 @@ async def main() -> None:
     await db_mod.ensure_schema(db)
 
     r = await get_redis(settings.redis_url)
+
+    yd = YandexDiskClient(settings.yandex_oauth_token)
+
+    async def show_folder(m: Message | None, cq: CallbackQuery | None, folder_path: str) -> None:
+        """List a Yandex folder and show inline navigation."""
+        items = await yd.list_dir(folder_path, limit=200, offset=0)
+        # sort: folders first, then files; by name
+        def key(it):
+            t = it.get("type")
+            return (0 if t == 'dir' else 1, str(it.get('name') or '').lower())
+        items_sorted = sorted(items, key=key)
+        kb = InlineKeyboardBuilder()
+        # upsert children into catalog_items and add buttons
+        for it in items_sorted[:50]:
+            name = str(it.get('name') or '')
+            if not name:
+                continue
+            kind = 'folder' if it.get('type') == 'dir' else 'file'
+            child_path = str(it.get('path') or '')
+            # Yandex often returns 'disk:/...' paths; normalize to '/...'
+            
+            if child_path.startswith('disk:'):
+                child_path = child_path[len('disk:'):]
+            item_id = await db_mod.upsert_catalog_item(
+                db, path=child_path, kind=kind, title=name, yandex_id=child_path, size_bytes=it.get('size')
+            )
+            if kind == 'folder':
+                kb.button(text=f"📁 {name}", callback_data=f"open:{item_id}")
+            else:
+                kb.button(text=f"📄 {name}", callback_data=f"dl:{item_id}")
+        kb.adjust(1)
+        # Back button if not root
+        if folder_path.rstrip('/') != settings.yandex_base_path.rstrip('/'):
+            parent = folder_path.rstrip('/')
+            parent = parent[: parent.rfind('/')] if '/' in parent[1:] else settings.yandex_base_path
+            # normalize parent
+            parent_item = await db_mod.upsert_catalog_item(db, path=parent, kind='folder', title='..', yandex_id=parent)
+            kb.button(text='⬅️ Назад', callback_data=f"open:{parent_item}")
+            kb.adjust(1)
+        text = f"Папка: {folder_path}\nВыбери папку или файл:"
+        markup = kb.as_markup()
+        if cq is not None:
+            await cq.message.edit_text(text, reply_markup=markup)
+            await cq.answer()
+        elif m is not None:
+            await m.answer(text, reply_markup=markup)
 
     @dp.message(Command("start"))
     async def start(m: Message) -> None:
@@ -63,10 +106,42 @@ async def main() -> None:
             "Команды:\n"
             "/seed - (admin) добавить тестовый файл в каталог\n"
             "/list - показать тестовый каталог\n"
-            "/download <id> - поставить задачу на отправку файла
-/job <job_id> - статус задачи
-/jobs - последние задачи в этом чате"
+            "/download <id> - поставить задачу на отправку файла"
         )
+
+    @dp.message(Command("categories"))
+    async def categories(m: Message) -> None:
+        REQ_TOTAL.labels(command="categories").inc()
+        await show_folder(m=m, cq=None, folder_path=settings.yandex_base_path)
+
+    @dp.callback_query(F.data.startswith("open:"))
+    async def cb_open(cq: CallbackQuery) -> None:
+        try:
+            item_id = int((cq.data or '').split(':', 1)[1])
+            item = await db_mod.fetch_catalog_item(db, item_id)
+            await show_folder(m=None, cq=cq, folder_path=item['path'])
+        except Exception as e:
+            log.warning('cb_open_failed', err=str(e))
+            await cq.answer('Не удалось открыть папку', show_alert=True)
+
+    @dp.callback_query(F.data.startswith("dl:"))
+    async def cb_download(cq: CallbackQuery) -> None:
+        try:
+            item_id = int((cq.data or '').split(':', 1)[1])
+        except Exception:
+            await cq.answer('Некорректный id', show_alert=True)
+            return
+        request_id = str(uuid.uuid4())
+        try:
+            job_id = await db_mod.insert_job(
+                db, tg_chat_id=cq.message.chat.id, tg_user_id=cq.from_user.id, catalog_item_id=item_id, request_id=request_id
+            )
+            await enqueue(r, job_id)
+            JOB_ENQUEUE_TOTAL.inc()
+            await cq.answer(f"Ок. Задача #{job_id}.")
+        except Exception as e:
+            log.warning('cb_download_failed', err=str(e))
+            await cq.answer('Не удалось создать задачу', show_alert=True)
 
     @dp.message(Command("seed"))
     async def seed(m: Message) -> None:
@@ -74,25 +149,6 @@ async def main() -> None:
         if settings.admin_ids_set() and m.from_user.id not in settings.admin_ids_set():
             await m.answer("Недостаточно прав.")
             return
-        demo_path = "/demo.pdf"
-
-        # In local mode, ensure a demo file exists inside the shared /data volume.
-        if settings.storage_mode.strip().lower() == "local":
-            root = Path(settings.local_storage_root)
-            root.mkdir(parents=True, exist_ok=True)
-            demo_file = root / demo_path.lstrip("/")
-            if not demo_file.exists():
-                # Small valid-ish PDF so Telegram previews don't get weird.
-                demo_file.write_bytes(
-                    b"%PDF-1.4\n1 0 obj<<>>endobj\n"
-                    b"2 0 obj<< /Type /Catalog /Pages 3 0 R >>endobj\n"
-                    b"3 0 obj<< /Type /Pages /Kids [4 0 R] /Count 1 >>endobj\n"
-                    b"4 0 obj<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>endobj\n"
-                    b"5 0 obj<< /Length 44 >>stream\nBT /F1 12 Tf 20 100 Td (Adaspeas demo) Tj ET\nendstream endobj\n"
-                    b"xref\n0 6\n0000000000 65535 f \n"
-                    b"trailer<< /Root 2 0 R /Size 6 >>\nstartxref\n0\n%%EOF\n"
-                )
-
         # Create a single demo item if not exists
         await db.execute(
             """
@@ -100,11 +156,10 @@ async def main() -> None:
             VALUES (?, 'file', ?, ?)
             ON CONFLICT(path) DO NOTHING
             """,
-            (demo_path, "Demo PDF", demo_path),
+            ("/demo.pdf", "Demo PDF", "/demo.pdf"),
         )
         await db.commit()
-        mode = settings.storage_mode.strip().lower()
-        await m.answer(f"Ок. Добавил {demo_path} как тестовый элемент каталога. storage_mode={mode}")
+        await m.answer("Ок. Добавил /demo.pdf как тестовый элемент каталога.")
 
     @dp.message(Command("list"))
     async def list_catalog(m: Message) -> None:
@@ -143,43 +198,6 @@ async def main() -> None:
         await enqueue(r, job_id)
         JOB_ENQUEUE_TOTAL.inc()
         await m.answer(f"Ок. Поставил задачу #{job_id}.")
-
-    @dp.message(Command("job"))
-    async def job_status(m: Message) -> None:
-        REQ_TOTAL.labels(command="job").inc()
-        parts = (m.text or "").split()
-        if len(parts) != 2 or not parts[1].isdigit():
-            await m.answer("Использование: /job <job_id>")
-            return
-        job_id = int(parts[1])
-        try:
-            job = await db_mod.fetch_job(db, job_id)
-        except Exception:
-            await m.answer("Задача не найдена.")
-            return
-        if job["tg_chat_id"] != m.chat.id:
-            await m.answer("Задача из другого чата.")
-            return
-        msg = f"Задача #{job_id}: state={job['state']}, attempt={job['attempt']}"
-        if job.get("last_error"):
-            msg += f"\nlast_error: {job['last_error']}"
-        await m.answer(msg)
-
-    @dp.message(Command("jobs"))
-    async def jobs_recent(m: Message) -> None:
-        REQ_TOTAL.labels(command="jobs").inc()
-        jobs = await db_mod.fetch_jobs_for_chat(db, m.chat.id, limit=10)
-        if not jobs:
-            await m.answer("В этом чате пока нет задач.")
-            return
-        lines = []
-        for j in jobs:
-            line = f"#{j['id']}: item={j['catalog_item_id']} state={j['state']} attempt={j['attempt']}"
-            if j.get("last_error"):
-                line += " (err)"
-            lines.append(line)
-        await m.answer("Последние задачи:\n" + "\n".join(lines))
-
 
     # Run HTTP + bot polling together
     app = await make_app()

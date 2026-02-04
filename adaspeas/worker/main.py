@@ -13,7 +13,7 @@ from adaspeas.common.logging import setup_logging
 from adaspeas.common.settings import Settings
 from adaspeas.common import db as db_mod
 from adaspeas.common.queue import get_redis, enqueue, dequeue
-from adaspeas.storage import StorageClient, make_storage_client
+from adaspeas.storage.yandex_disk import YandexDiskClient
 
 log = structlog.get_logger()
 
@@ -38,16 +38,14 @@ async def make_app() -> web.Application:
     return app
 
 
-async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, r, job_id: int) -> None:
+async def process_one(settings: Settings, bot: Bot, yd: YandexDiskClient, db, r, job_id: int) -> None:
     job = await db_mod.fetch_job(db, job_id)
 
     # Skip if already terminal
     if job["state"] in {"succeeded", "failed", "cancelled"}:
         return
 
-    claimed = await db_mod.try_claim_job(db, job_id)
-    if not claimed:
-        return
+    await db_mod.set_job_state(db, job_id, "running")
     JOBS_RUNNING.inc()
 
     try:
@@ -57,15 +55,11 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
 
         # Download to a temporary file (spool). Deleted immediately after send.
         with tempfile.NamedTemporaryFile(prefix="adaspeas_", suffix=".bin", delete=True) as tmp:
-            async for chunk in storage.stream_download(item["yandex_id"]):
+            async for chunk in yd.stream_download(item["yandex_id"]):
                 tmp.write(chunk)
             tmp.flush()
 
-            await bot.send_document(
-                chat_id=job["tg_chat_id"],
-                document=FSInputFile(tmp.name),
-                caption=item["title"],
-            )
+            await bot.send_document(chat_id=job["tg_chat_id"], document=FSInputFile(tmp.name), caption=item["title"])
 
         await db_mod.set_job_state(db, job_id, "succeeded")
         JOBS_SUCCEEDED.inc()
@@ -92,7 +86,7 @@ async def worker_loop(settings: Settings) -> None:
     setup_logging(settings.log_level)
 
     bot = Bot(token=settings.bot_token)
-    storage = make_storage_client(settings)
+    yd = YandexDiskClient(settings.yandex_oauth_token)
 
     db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
@@ -104,7 +98,7 @@ async def worker_loop(settings: Settings) -> None:
             if job_id is None:
                 await asyncio.sleep(0)
                 continue
-            await process_one(settings, bot, storage, db, r, job_id)
+            await process_one(settings, bot, yd, db, r, job_id)
     finally:
         await bot.session.close()
         await db.close()

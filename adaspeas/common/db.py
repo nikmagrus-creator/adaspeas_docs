@@ -122,49 +122,6 @@ async def set_job_state(
     await db.commit()
 
 
-
-async def try_claim_job(db: aiosqlite.Connection, job_id: int) -> bool:
-    """Atomically claim a queued job for processing.
-
-    Returns True if the job was in 'queued' state and is now 'running'.
-    Returns False if the job was not claimable (already running/terminal/missing).
-    """
-    cur = await db.execute(
-        """
-        UPDATE jobs
-        SET state='running', updated_at=datetime('now')
-        WHERE id=? AND state='queued'
-        """,
-        (job_id,),
-    )
-    await db.commit()
-    return cur.rowcount == 1
-
-
-async def fetch_jobs_for_chat(db: aiosqlite.Connection, tg_chat_id: int, limit: int = 10) -> list[dict]:
-    cur = await db.execute(
-        """
-        SELECT id, catalog_item_id, state, attempt, last_error, created_at, updated_at
-        FROM jobs
-        WHERE tg_chat_id=?
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (tg_chat_id, limit),
-    )
-    rows = await cur.fetchall()
-    return [
-        {
-            "id": int(r[0]),
-            "catalog_item_id": int(r[1]),
-            "state": r[2],
-            "attempt": int(r[3]),
-            "last_error": r[4],
-            "created_at": r[5],
-            "updated_at": r[6],
-        }
-        for r in rows
-    ]
 async def bump_attempt(db: aiosqlite.Connection, job_id: int, last_error: str) -> int:
     await db.execute(
         """
@@ -221,4 +178,49 @@ async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
         "kind": row[2],
         "title": row[3],
         "yandex_id": row[4],
+    }
+
+async def upsert_catalog_item(
+    db: aiosqlite.Connection,
+    *,
+    path: str,
+    kind: str,
+    title: str,
+    yandex_id: str | None = None,
+    size_bytes: int | None = None,
+) -> int:
+    await db.execute(
+        """
+        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET
+          kind=excluded.kind,
+          title=excluded.title,
+          yandex_id=excluded.yandex_id,
+          size_bytes=excluded.size_bytes,
+          updated_at=datetime('now')
+        """,
+        (path, kind, title, yandex_id, size_bytes),
+    )
+    await db.commit()
+    cur = await db.execute("SELECT id FROM catalog_items WHERE path = ?", (path,))
+    row = await cur.fetchone()
+    return int(row[0])
+
+
+async def fetch_catalog_item_by_path(db: aiosqlite.Connection, path: str) -> dict:
+    cur = await db.execute(
+        "SELECT id, path, kind, title, yandex_id, size_bytes FROM catalog_items WHERE path = ?",
+        (path,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        raise KeyError(f"catalog item not found: {path}")
+    return {
+        "id": row[0],
+        "path": row[1],
+        "kind": row[2],
+        "title": row[3],
+        "yandex_id": row[4],
+        "size_bytes": row[5],
     }
