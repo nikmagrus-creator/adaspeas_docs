@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     admin_user_ids: str = ""
 
     # Storage
-    yandex_oauth_token: str
+    storage_mode: str = "yandex"  # yandex | local
+    yandex_oauth_token: str = ""
     yandex_base_path: str = "/Zkvpr"
+    local_storage_root: str = "/data/storage"
 
     # DB
     sqlite_path: str = "/data/adaspeas.sqlite"

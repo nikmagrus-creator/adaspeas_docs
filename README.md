@@ -11,6 +11,9 @@
 
 ```bash
 cp .env.example .env
+# Для локального end-to-end без Яндекс.Диска:
+#   - выставь STORAGE_MODE=local
+#   - вызови /seed в боте (создаст /data/storage/demo.pdf)
 docker compose up --build
 ```
 

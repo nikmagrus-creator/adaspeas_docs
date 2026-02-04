@@ -1,15 +1,11 @@
 import asyncio
 import os
-import tempfile
 import sys
-from pathlib import Path
-
-# Allow running tests without installing the package
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'src'))
-
+import tempfile
 
 import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from adaspeas.common import db as db_mod
 
