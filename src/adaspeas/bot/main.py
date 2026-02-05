@@ -5,6 +5,8 @@ import os
 import uuid
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand
 from aiogram.exceptions import TelegramUnauthorizedError
@@ -43,14 +45,19 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
-    bot = Bot(token=settings.bot_token)
+    if settings.use_local_bot_api:
+        api = TelegramAPIServer.from_base(settings.local_bot_api_base, is_local=True)
+        session = AiohttpSession(api=api)
+        bot = Bot(token=settings.bot_token, session=session)
+    else:
+        bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
     # Publish command list in Telegram UI
     try:
         await bot.set_my_commands([
             BotCommand(command='start', description='Показать справку'),
-            BotCommand(command='categories', description='Каталог из Яндекс.Диска'),
+            BotCommand(command='categories', description='Каталог'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
             BotCommand(command='download', description='Скачать файл по id из /list')
         ])
@@ -70,7 +77,7 @@ async def main() -> None:
         await m.answer(
             "Привет. Это Adaspeas MVP.\n\n"
             "Команды:\n"
-            "/categories - показать каталог из Яндекс.Диска (/Zkvpr)\n"
+            "/categories - показать каталог\n"
             "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
             "/list - показать тестовый каталог\n"
             "/download <id> - поставить задачу на отправку файла"
@@ -88,11 +95,13 @@ async def main() -> None:
             return
 
         base = (settings.yandex_base_path or "/").strip() if getattr(settings, "storage_mode", "yandex") != "local" else "/"
-        items: list[tuple[str,str,str,str|None,int|None]] = []
+
+        # (path, kind, title, storage_id, size, modified, md5)
+        items: list[tuple[str, str, str, str | None, int | None, str | None, str | None]] = []
 
         if getattr(settings, "storage_mode", "yandex") == "local":
-            # local: list files under local_storage_root
             import os as _os
+
             root_dir = getattr(settings, "local_storage_root", "/data/storage")
             try:
                 for name in sorted(_os.listdir(root_dir))[:200]:
@@ -104,31 +113,40 @@ async def main() -> None:
                         kind = "file"
                         size = _os.path.getsize(full)
                     path = "/" + name
-                    items.append((path, kind, name, path, size))
+                    items.append((path, kind, name, path, size, None, None))
             except Exception as e:
                 await m.answer(f"Не удалось прочитать локальное хранилище: {e}")
                 return
         else:
-            # yandex: list one level under base path
             try:
                 raw_items = await storage.list_dir(base)  # type: ignore[attr-defined]
             except Exception as e:
-                await m.answer(f"Не удалось получить каталог из Яндекс.Диска: {e}")
+                await m.answer(f"Не удалось получить каталог: {e}")
                 return
 
             for it in raw_items:
                 kind = "folder" if it.get("type") == "dir" else "file"
                 path = it.get("path") or it.get("name") or ""
                 title = it.get("name") or path
-                yid = path
+                storage_id = path
                 size = it.get("size")
-                items.append((path, kind, title, yid, size))
+                modified = it.get("modified")
+                md5 = it.get("md5")
+                items.append((path, kind, title, storage_id, size, modified, md5))
 
-        # Upsert into DB
-        for path, kind, title, yid, size in items:
+        for path, kind, title, storage_id, size, modified, md5 in items:
             if not path:
                 continue
-            await db_mod.upsert_catalog_item(db, path=path, kind=kind, title=title, yandex_id=yid, size_bytes=size)
+            await db_mod.upsert_catalog_item(
+                db,
+                path=path,
+                kind=kind,
+                title=title,
+                yandex_id=storage_id,
+                size_bytes=size,
+                yandex_modified=modified,
+                yandex_md5=md5,
+            )
 
         # Show first 50 entries
         cur = await db.execute(

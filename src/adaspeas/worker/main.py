@@ -5,6 +5,9 @@ import tempfile
 
 from aiohttp import web
 from aiogram import Bot
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -53,17 +56,40 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         if item["kind"] != "file":
             raise RuntimeError("catalog item is not a file")
 
+        # Fast path: if we have a cached Telegram file_id, resend without hitting storage.
+        if item.get("tg_file_id"):
+            try:
+                await bot.send_document(
+                    chat_id=job["tg_chat_id"],
+                    document=item["tg_file_id"],
+                    caption=item["title"],
+                )
+                await db_mod.set_job_state(db, job_id, "succeeded")
+                JOBS_SUCCEEDED.inc()
+                log.info("job_succeeded_from_cache", job_id=job_id)
+                return
+            except TelegramBadRequest:
+                # Cached file_id became invalid (rare, but happens). Drop cache and fallback.
+                await db_mod.clear_catalog_item_tg_file(db, item["id"])
+            except Exception:
+                # Any other error: fall back to normal flow.
+                pass
+
         # Download to a temporary file (spool). Deleted immediately after send.
         with tempfile.NamedTemporaryFile(prefix="adaspeas_", suffix=".bin", delete=True) as tmp:
             async for chunk in storage.stream_download(item["yandex_id"]):
                 tmp.write(chunk)
             tmp.flush()
 
-            await bot.send_document(
+            msg = await bot.send_document(
                 chat_id=job["tg_chat_id"],
                 document=FSInputFile(tmp.name),
                 caption=item["title"],
             )
+
+        # Save file_id for future requests
+        if msg.document and msg.document.file_id:
+            await db_mod.set_catalog_item_tg_file(db, item["id"], msg.document.file_id, getattr(msg.document, "file_unique_id", None))
 
         await db_mod.set_job_state(db, job_id, "succeeded")
         JOBS_SUCCEEDED.inc()
@@ -89,7 +115,12 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
 async def worker_loop(settings: Settings) -> None:
     setup_logging(settings.log_level)
 
-    bot = Bot(token=settings.bot_token)
+    if settings.use_local_bot_api:
+        api = TelegramAPIServer.from_base(settings.local_bot_api_base, is_local=True)
+        session = AiohttpSession(api=api)
+        bot = Bot(token=settings.bot_token, session=session)
+    else:
+        bot = Bot(token=settings.bot_token)
     storage = make_storage_client(settings)
 
     db = await db_mod.connect(settings.sqlite_path)
