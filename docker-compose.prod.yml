@@ -4,20 +4,30 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   bot:
     image: ${IMAGE}
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      SQLITE_PATH: /data/app.db
     volumes:
       - app_data:/data
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   worker:
     image: ${IMAGE}
@@ -25,14 +35,19 @@ services:
     command: ["python", "-m", "adaspeas.worker.main"]
     env_file:
       - .env
-    environment:
-      SQLITE_PATH: /data/app.db
     volumes:
       - app_data:/data
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     expose:
       - "8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   caddy:
     image: caddy:2-alpine
@@ -51,7 +66,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - bot
+      bot:
+        condition: service_healthy
 
 volumes:
   redis_data:

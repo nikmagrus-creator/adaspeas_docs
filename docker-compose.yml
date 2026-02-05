@@ -1,27 +1,49 @@
 services:
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   bot:
     build: .
+    restart: unless-stopped
     command: ["python", "-m", "adaspeas.bot.main"]
     env_file: .env
     volumes:
       - ./data:/data
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   worker:
     build: .
+    restart: unless-stopped
     command: ["python", "-m", "adaspeas.worker.main"]
     env_file: .env
     volumes:
       - ./data:/data
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s

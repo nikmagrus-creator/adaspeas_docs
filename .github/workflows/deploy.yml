@@ -64,6 +64,21 @@ jobs:
 
           echo "Docs policy check passed."
 
+      - name: Python sanity (compile + tests if any)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile + pytest
+        run: |
+          python -m compileall -q src
+          pytest -q || test $? -eq 5
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -81,6 +96,8 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}

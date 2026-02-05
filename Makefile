@@ -7,4 +7,4 @@ down:
 	docker compose down
 
 test:
-	PYTHONPATH=src python -m pytest -q
+	PYTHONPATH=src python -m pytest -q || test $$? -eq 5
