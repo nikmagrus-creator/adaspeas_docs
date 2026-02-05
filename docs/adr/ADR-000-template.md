@@ -1,9 +1,9 @@
 # ADR-000: Template
 
-Актуально на: 2026-02-05 00:00 UTC
+Актуально на: 2026-02-05 03:00 MSK
 
 - Status: Proposed | Accepted | Rejected | Deprecated | Superseded
-- Date (UTC): YYYY-MM-DD HH:MM UTC
+- Date (MSK): YYYY-MM-DD HH:MM MSK
 - Deciders: (кто принял)
 - Technical Story: (ссылка на задачу/чатлог/issue, если есть)
 

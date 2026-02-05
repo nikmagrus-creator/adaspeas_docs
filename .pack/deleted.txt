@@ -1,0 +1,6 @@
+.env
+TECH_SPEC_RU.md
+PATCH_REPORT.md
+docs/handbook
+handbook
+INDEX_RU.md

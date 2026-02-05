@@ -35,11 +35,11 @@ jobs:
           changed_files="$(git diff --name-only "$BEFORE" "$AFTER" || true)"
           added_docs="$(git diff --name-status "$BEFORE" "$AFTER" | awk '$1=="A" && $2 ~ /^docs\// {print $2}' || true)"
 
-          # No new docs files unless ADR/handbook/CHATLOG
+          # No new docs files unless ADR/CHATLOG
           if [ -n "${added_docs}" ]; then
-            bad="$(echo "${added_docs}" | grep -Ev '^(docs/adr/|docs/handbook/|docs/CHATLOG_RU\.md$)' || true)"
+            bad="$(echo "${added_docs}" | grep -Ev '^(docs/adr/|docs/CHATLOG_RU\.md$)' || true)"
             if [ -n "${bad}" ]; then
-              echo "ERROR: New docs files are not allowed (except ADR/handbook/CHATLOG)."
+              echo "ERROR: New docs files are not allowed (except ADR/CHATLOG)."
               echo "${bad}"
               exit 1
             fi

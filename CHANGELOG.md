@@ -8,5 +8,5 @@
 ### Changed
 - docs: переписан WORKFLOW_CONTRACT_RU.md под автономную разработку ассистентом (CHATLOG/ADR/CHANGELOG, инкрементальные пакеты, требования к командам)
 - docs: INDEX_RU.md дополнен ссылкой на CHATLOG
-- docs: ADR template уточнён (UTC/Status/Consequences)
+- docs: ADR template уточнён (MSK/Status/Consequences)
 - ci: docs policy check разрешает docs/CHATLOG_RU.md
