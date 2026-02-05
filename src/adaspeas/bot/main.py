@@ -7,6 +7,7 @@ import uuid
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand
+from aiogram.exceptions import TelegramUnauthorizedError
 from aiohttp import web
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -219,6 +220,12 @@ async def main() -> None:
 
     try:
         await dp.start_polling(bot)
+    except TelegramUnauthorizedError:
+        # In CI smoke we use a fake token; keep /health alive instead of crash-looping.
+        if os.getenv("CI_SMOKE", "0") == "1":
+            log.warning("Telegram token unauthorized in CI_SMOKE; keeping service alive for health checks")
+            await asyncio.Event().wait()
+        raise
     finally:
         await bot.session.close()
         await db.close()
