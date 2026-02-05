@@ -1,6 +1,6 @@
 # WORKFLOW_CONTRACT (RU): правила работы с проектом и разработки ассистентом
 
-Актуально на: 2026-02-05 03:00 MSK
+Актуально на: 2026-02-05 16:45 MSK
 Цель: чтобы ассистент мог **самостоятельно** развивать продукт end-to-end (код+доки+деплой через CI) и при этом проект сохранял память: решения, итоги сессий, изменения.
 
 ---
@@ -109,21 +109,35 @@ Living docs проекта (минимальный набор):
 ---
 
 ### 5.2) Стандартный блок команд (применение пакета + push)
-Команды должны быть **минимальными** и безопасными для GNOME Terminal/VTE:
-- не использовать `set -e`
-- не использовать `return` (в интерактивной сессии он часто падает и ломает сценарий)
-- не удалять `.git` (это и есть репозиторий; без него не будет `git add/commit/push`)
-- можно удалять `.env` (секреты не должны жить в репозитории)
+Команды должны быть **минимальными**, выполняться целиком в GNOME Terminal/VTE без самозакрытия окна:
+- **не** использовать `set -e`, **не** делать `exit`
+- для остановки использовать `return` (если запускается в текущей оболочке)
 
-Канонический шаблон (инкрементальный пакет + удаления + push). Команды связаны через `&&`, поэтому при ошибке цепочка просто остановится, не закрывая терминал:
-
+Шаблон (каноничные пути):  
 ```bash
-cd /home/nik/projects/adaspeas && test -d .git && test -z "$(git status --porcelain)" && PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" && rm -f .env && tar -xzf "$PACK" -C /home/nik/projects/adaspeas && if test -f .pack/deleted.txt; then   while IFS= read -r p; do     test -n "$p" || continue;     git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p";   done < .pack/deleted.txt; fi && git add -A && git commit -m "apply: incremental pack" && git push
+cd /home/nik/projects/adaspeas || return
+test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; return; }
+
+PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz"
+
+tar -xzf "$PACK" -C /home/nik/projects/adaspeas
+
+# удалить то, что пакет пометил как удалённое (если файл существует)
+test -f .pack/deleted.txt && while IFS= read -r p; do
+  test -n "$p" || continue
+  git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
+done < .pack/deleted.txt
+
+git add -A
+git commit -m "<MESSAGE>"
+git push
 ```
 
-Пояснение:
-- `test -d .git` защищает от ситуации “папка не является git-репозиторием”.
-- `.pack/deleted.txt` применяется **после** распаковки (tar не умеет удалять отсутствующие файлы).
+Требования к пакету:
+- Формат: **tar.gz**
+- Содержит **только** изменённые файлы/папки (с сохранением путей)
+- Если нужны удаления: добавить `.pack/deleted.txt` (список путей, по одному на строку)
+- Запрещено включать в пакет: `.git/`, секреты (`.env`, ключи, токены), большие артефакты сборки, кэши.
 
 
 ## 6) Мини-checklist перед выдачей пакета
@@ -132,6 +146,7 @@ cd /home/nik/projects/adaspeas && test -d .git && test -z "$(git status --porcel
 - архив распакуется поверх репозитория и не создаст лишний уровень папок
 - повторное применение пакета не ломает репозиторий (идемпотентность)
 - если есть удаления, они перечислены в `.pack/deleted.txt` и включены в команды
+- любые изменения Docker/compose/CI считаются готовыми только если проходит job **ci-smoke** (подъём стека + /health)
 
 ---
 
@@ -142,3 +157,4 @@ cd /home/nik/projects/adaspeas && test -d .git && test -z "$(git status --porcel
 | 2026-02-04 16:45 MSK | ChatGPT | contract | Уточнено: всегда начинать с GitHub docs-репозитория; вложения считать потенциально устаревшими | |
 | 2026-02-04 17:30 MSK | ChatGPT | doc | Зафиксированы каноничные пути (local/VPS) и запрет ручных правок на VPS | |
 | 2026-02-05 03:00 MSK | ChatGPT | contract | Переписан контракт под автономную разработку ассистентом: CHATLOG/ADR/CHANGELOG, инкрементальные пакеты, требования к командам | |
+| 2026-02-05 16:45 MSK | ChatGPT | contract | Добавлено правило: infra-изменения принимаются только при зелёном CI-smoke; CI усиливается hadolint+trivy+compose-smoke | |
