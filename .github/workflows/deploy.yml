@@ -20,7 +20,7 @@ jobs:
       image: ghcr.io/${{ github.repository }}:latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Repo hygiene (.env must not be tracked, except .env.example)
         shell: bash
@@ -128,7 +128,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Ensure .env exists for Compose
         shell: bash
