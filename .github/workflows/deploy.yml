@@ -22,11 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fail if .env is tracked
+      - name: Repo hygiene (.env must not be tracked)
         run: |
-          if git ls-files -z | tr '\0' '\n' | grep -E '(^|/)\.env(\.|$)'; then
-            echo "ERROR: .env (or .env.*) is tracked in git. Remove it and keep only .env.example.";
-            exit 1;
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "ERROR: .env is tracked by git. Remove it and use .env.example."
+            exit 1
+          fi
+          if git ls-files ".env.*" | grep -q .; then
+            echo "ERROR: .env.* file(s) are tracked by git. Remove them."
+            git ls-files ".env.*"
+            exit 1
           fi
 
       - name: Docs policy check (timestamps + no doc sprawl)
@@ -109,8 +114,76 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-  deploy:
+
+  ci-smoke:
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Trivy report (fs, SARIF)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: 0
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Trivy gate (fs, fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          skip-setup-trivy: true
+
+      - name: Compose config validate (dev)
+        run: docker compose -f docker-compose.yml config
+
+      - name: Start stack (dev)
+        run: docker compose -f docker-compose.yml up -d --build
+
+      - name: Wait for /health (bot 8080, worker 8081)
+        run: |
+          set -eu
+          for i in $(seq 1 60); do
+            if curl -fsS "http://localhost:8080/health" >/dev/null && curl -fsS "http://localhost:8081/health" >/dev/null; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "healthcheck timeout"
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --no-color
+          exit 1
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
+
+  deploy:
+    needs: [build, ci-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
