@@ -35,11 +35,11 @@ jobs:
           changed_files="$(git diff --name-only "$BEFORE" "$AFTER" || true)"
           added_docs="$(git diff --name-status "$BEFORE" "$AFTER" | awk '$1=="A" && $2 ~ /^docs\// {print $2}' || true)"
 
-          # No new docs files unless ADR or ops runbook
+          # No new docs files unless ADR/handbook/CHATLOG
           if [ -n "${added_docs}" ]; then
-            bad="$(echo "${added_docs}" | grep -Ev '^(docs/adr/|docs/handbook/)' || true)"
+            bad="$(echo "${added_docs}" | grep -Ev '^(docs/adr/|docs/handbook/|docs/CHATLOG_RU\.md$)' || true)"
             if [ -n "${bad}" ]; then
-              echo "ERROR: New docs files are not allowed (except ADR/runbook)."
+              echo "ERROR: New docs files are not allowed (except ADR/handbook/CHATLOG)."
               echo "${bad}"
               exit 1
             fi
@@ -51,13 +51,8 @@ jobs:
           for f in ${living_docs}; do
             if echo "${changed_files}" | grep -qx "${f}"; then
               echo "Validating living doc: ${f}"
-              if [ "${f}" = "docs/INDEX_RU.md" ] || [ "${f}" = "docs/DOCS_RATIONALE_RU.md" ] || [ "${f}" = "docs/WORKFLOW_CONTRACT_RU.md" ] || [ "${f}" = "docs/PRD_RU.md" ] || [ "${f}" = "docs/TECH_SPEC_RU.md" ] || [ "${f}" = "docs/OPS_RUNBOOK_RU.md" ] || [ "${f}" = "docs/ROADMAP_RU.md" ]; then
-                grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
-                grep -q '^## История изменений' "${f}"
-              else
-                grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
-                grep -q '^## История изменений' "${f}"
-              fi
+              grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
+              grep -q '^## История изменений' "${f}"
 
               # Table must contain at least one data row with UTC
               if ! grep -E '^[|].*UTC.*[|]' "${f}" >/dev/null; then

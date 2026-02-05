@@ -1,15 +1,22 @@
 # ADR-000: Template
 
-* Status: Proposed | Accepted | Deprecated | Superseded
-* Date: YYYY-MM-DD
-* Deciders: (optional)
-* Context link: (issue/PR URL, optional)
+Актуально на: 2026-02-05 00:00 UTC
+
+- Status: Proposed | Accepted | Rejected | Deprecated | Superseded
+- Date (UTC): YYYY-MM-DD HH:MM UTC
+- Deciders: (кто принял)
+- Technical Story: (ссылка на задачу/чатлог/issue, если есть)
 
 ## Context
-Что заставило принять решение? Какие силы/ограничения?
+Кратко: какая проблема/ограничения/варианты.
 
 ## Decision
-Что мы решили сделать? Формулировка “Мы будем …”.
+Что решено и почему это лучше альтернатив.
 
 ## Consequences
-Что стало проще/сложнее? Плюсы/минусы. Какие follow-up решения нужны?
+Что становится проще/сложнее, риски, что нужно сделать.
+
+## Links
+- Chatlog: docs/CHATLOG_RU.md (указать запись)
+- Related ADRs: ADR-XXX
+- Changelog: CHANGELOG.md (если влияет на поведение)
