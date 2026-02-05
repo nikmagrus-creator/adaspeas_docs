@@ -9,10 +9,42 @@ class StorageClient(Protocol):
     async def stream_download(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
         ...
 
+    async def list_dir(self, path: str) -> list[dict]:
+        ...
+
 
 class LocalDiskClient:
     def __init__(self, root: str):
         self._root = Path(root)
+
+
+    async def list_dir(self, path: str) -> list[dict]:
+        rel = path.lstrip("/")
+        base = (self._root / rel).resolve()
+        if self._root.resolve() not in base.parents and base != self._root.resolve():
+            raise RuntimeError("Local storage: invalid path")
+        if not base.exists() or not base.is_dir():
+            raise FileNotFoundError(str(base))
+
+        import os
+        out: list[dict] = []
+        for name in sorted(os.listdir(base))[:500]:
+            full = (base / name)
+            if full.is_dir():
+                out.append({"name": name, "type": "dir", "path": (path.rstrip("/") + "/" + name) if path != "/" else "/" + name})
+            elif full.is_file():
+                try:
+                    st = full.stat()
+                    out.append({
+                        "name": name,
+                        "type": "file",
+                        "path": (path.rstrip("/") + "/" + name) if path != "/" else "/" + name,
+                        "size": int(st.st_size),
+                        "modified": None,
+                    })
+                except Exception:
+                    out.append({"name": name, "type": "file", "path": (path.rstrip("/") + "/" + name) if path != "/" else "/" + name})
+        return out
 
     async def stream_download(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
         rel = path.lstrip("/")

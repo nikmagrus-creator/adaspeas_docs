@@ -30,12 +30,18 @@ CREATE TABLE IF NOT EXISTS user_roles (
 
 CREATE TABLE IF NOT EXISTS catalog_items (
   id INTEGER PRIMARY KEY,
+  parent_id INTEGER,
   path TEXT NOT NULL UNIQUE,
   kind TEXT NOT NULL CHECK(kind IN ('folder','file')),
   title TEXT NOT NULL,
   yandex_id TEXT,
   size_bytes INTEGER,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  yandex_modified TEXT,
+  yandex_md5 TEXT,
+  tg_file_id TEXT,
+  tg_file_unique_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (parent_id) REFERENCES catalog_items(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -55,6 +61,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
 CREATE INDEX IF NOT EXISTS idx_catalog_path ON catalog_items(path);
+CREATE INDEX IF NOT EXISTS idx_catalog_parent ON catalog_items(parent_id);
 """
 
 
@@ -68,11 +75,27 @@ async def connect(sqlite_path: str) -> aiosqlite.Connection:
 
 async def ensure_schema(db: aiosqlite.Connection) -> None:
     await db.executescript(SCHEMA_V1)
-    # initialize schema_version
-    cur = await db.execute("SELECT COUNT(*) FROM schema_version")
+
+    # schema_version is a single-row table (version as primary key)
+    cur = await db.execute("SELECT version FROM schema_version LIMIT 1")
     row = await cur.fetchone()
-    if row[0] == 0:
+    if row is None:
         await db.execute("INSERT INTO schema_version(version) VALUES (1)")
+        await db.commit()
+        version = 1
+    else:
+        version = int(row[0])
+
+    # v2: file_id cache + yandex fingerprints
+    if version < 2:
+        await _ensure_catalog_columns_v2(db)
+        await db.execute("UPDATE schema_version SET version=2")
+        await db.commit()
+
+    # v3: parent_id for inline tree navigation
+    if version < 3:
+        await _ensure_catalog_columns_v3(db)
+        await db.execute("UPDATE schema_version SET version=3")
         await db.commit()
 
 
@@ -164,7 +187,7 @@ async def fetch_job(db: aiosqlite.Connection, job_id: int) -> dict:
 async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
     cur = await db.execute(
         """
-        SELECT id, path, kind, title, yandex_id
+        SELECT id, parent_id, path, kind, title, yandex_id, yandex_md5, tg_file_id, tg_file_unique_id
         FROM catalog_items WHERE id=?
         """,
         (item_id,),
@@ -174,10 +197,14 @@ async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
         raise KeyError(f"catalog_item {item_id} not found")
     return {
         "id": int(row[0]),
-        "path": row[1],
-        "kind": row[2],
-        "title": row[3],
-        "yandex_id": row[4],
+        "parent_id": (int(row[1]) if row[1] is not None else None),
+        "path": row[2],
+        "kind": row[3],
+        "title": row[4],
+        "yandex_id": row[5],
+        "yandex_md5": row[6],
+        "tg_file_id": row[7],
+        "tg_file_unique_id": row[8],
     }
 
 
@@ -186,24 +213,147 @@ async def upsert_catalog_item(
     path: str,
     kind: str,
     title: str,
+    parent_id: int | None = None,
     yandex_id: str | None = None,
     size_bytes: int | None = None,
+    yandex_modified: str | None = None,
+    yandex_md5: str | None = None,
 ) -> int:
     """Insert/update catalog item by unique path. Returns item id."""
     await db.execute(
         """
-        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, updated_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO catalog_items(
+          path, parent_id, kind, title, yandex_id, size_bytes,
+          yandex_modified, yandex_md5,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(path) DO UPDATE SET
+          parent_id=excluded.parent_id,
           kind=excluded.kind,
           title=excluded.title,
           yandex_id=excluded.yandex_id,
           size_bytes=excluded.size_bytes,
+          yandex_modified=excluded.yandex_modified,
+          yandex_md5=excluded.yandex_md5,
+          tg_file_id=CASE
+            WHEN excluded.yandex_md5 IS NOT NULL
+             AND catalog_items.yandex_md5 IS NOT NULL
+             AND excluded.yandex_md5 != catalog_items.yandex_md5
+            THEN NULL
+            ELSE catalog_items.tg_file_id
+          END,
+          tg_file_unique_id=CASE
+            WHEN excluded.yandex_md5 IS NOT NULL
+             AND catalog_items.yandex_md5 IS NOT NULL
+             AND excluded.yandex_md5 != catalog_items.yandex_md5
+            THEN NULL
+            ELSE catalog_items.tg_file_unique_id
+          END,
           updated_at=datetime('now')
         """,
-        (path, kind, title, yandex_id, size_bytes),
+        (path, parent_id, kind, title, yandex_id, size_bytes, yandex_modified, yandex_md5),
     )
     await db.commit()
     cur = await db.execute("SELECT id FROM catalog_items WHERE path=?", (path,))
     row = await cur.fetchone()
     return int(row[0])
+
+
+async def set_catalog_item_tg_file(db: aiosqlite.Connection, item_id: int, tg_file_id: str, tg_file_unique_id: str | None) -> None:
+    await db.execute(
+        """
+        UPDATE catalog_items
+        SET tg_file_id=?, tg_file_unique_id=?, updated_at=datetime('now')
+        WHERE id=?
+        """,
+        (tg_file_id, tg_file_unique_id, item_id),
+    )
+    await db.commit()
+
+
+async def clear_catalog_item_tg_file(db: aiosqlite.Connection, item_id: int) -> None:
+    await db.execute(
+        """
+        UPDATE catalog_items
+        SET tg_file_id=NULL, tg_file_unique_id=NULL, updated_at=datetime('now')
+        WHERE id=?
+        """,
+        (item_id,),
+    )
+    await db.commit()
+
+
+async def _table_has_column(db: aiosqlite.Connection, table: str, column: str) -> bool:
+    cur = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cur.fetchall()
+    return any(r[1] == column for r in rows)
+
+
+async def _ensure_catalog_columns_v2(db: aiosqlite.Connection) -> None:
+    # Keep migrations idempotent for local dev.
+    if not await _table_has_column(db, "catalog_items", "yandex_modified"):
+        await db.execute("ALTER TABLE catalog_items ADD COLUMN yandex_modified TEXT")
+    if not await _table_has_column(db, "catalog_items", "yandex_md5"):
+        await db.execute("ALTER TABLE catalog_items ADD COLUMN yandex_md5 TEXT")
+    if not await _table_has_column(db, "catalog_items", "tg_file_id"):
+        await db.execute("ALTER TABLE catalog_items ADD COLUMN tg_file_id TEXT")
+    if not await _table_has_column(db, "catalog_items", "tg_file_unique_id"):
+        await db.execute("ALTER TABLE catalog_items ADD COLUMN tg_file_unique_id TEXT")
+
+
+async def _ensure_catalog_columns_v3(db: aiosqlite.Connection) -> None:
+    # Keep migrations idempotent for local dev.
+    if not await _table_has_column(db, "catalog_items", "parent_id"):
+        await db.execute("ALTER TABLE catalog_items ADD COLUMN parent_id INTEGER")
+    # Index is safe to (re)create.
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_catalog_parent ON catalog_items(parent_id)")
+
+
+async def ensure_root_catalog_item(db: aiosqlite.Connection, title: str = "Каталог") -> int:
+    """Ensure a virtual root folder exists (path='/') and return its id."""
+    await db.execute(
+        """
+        INSERT INTO catalog_items(path, parent_id, kind, title, yandex_id, updated_at)
+        VALUES ('/', NULL, 'folder', ?, NULL, datetime('now'))
+        ON CONFLICT(path) DO UPDATE SET
+          parent_id=NULL,
+          kind='folder',
+          title=excluded.title,
+          updated_at=datetime('now')
+        """,
+        (title,),
+    )
+    await db.commit()
+    cur = await db.execute("SELECT id FROM catalog_items WHERE path='/'")
+    row = await cur.fetchone()
+    return int(row[0])
+
+
+async def fetch_catalog_children(
+    db: aiosqlite.Connection,
+    parent_id: int,
+    offset: int,
+    limit: int,
+) -> list[dict]:
+    cur = await db.execute(
+        """
+        SELECT id, kind, title, path
+        FROM catalog_items
+        WHERE parent_id=?
+        ORDER BY kind DESC, title ASC
+        LIMIT ? OFFSET ?
+        """,
+        (parent_id, limit, offset),
+    )
+    rows = await cur.fetchall()
+    return [
+        {"id": int(r[0]), "kind": r[1], "title": r[2], "path": r[3]}
+        for r in rows
+    ]
+
+
+async def count_catalog_children(db: aiosqlite.Connection, parent_id: int) -> int:
+    cur = await db.execute("SELECT COUNT(*) FROM catalog_items WHERE parent_id=?", (parent_id,))
+    row = await cur.fetchone()
+    return int(row[0] or 0)
