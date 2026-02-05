@@ -1,17 +1,4 @@
 services:
-  local-bot-api:
-    image: aiogram/telegram-bot-api:latest
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
-      TELEGRAM_LOCAL: "1"
-      TELEGRAM_HTTP_PORT: "8082"
-    volumes:
-      - telegram_bot_api_data:/var/lib/telegram-bot-api
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -23,6 +10,20 @@ services:
       timeout: 3s
       retries: 10
 
+  local-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    profiles: ["localbotapi"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: "1"
+    volumes:
+      - tg_api_data:/var/lib/telegram-bot-api
+
+
   bot:
     image: ${IMAGE}
     restart: unless-stopped
@@ -31,8 +32,6 @@ services:
     volumes:
       - app_data:/data
     depends_on:
-      local-bot-api:
-        condition: service_started
       redis:
         condition: service_healthy
     expose:
@@ -53,8 +52,6 @@ services:
     volumes:
       - app_data:/data
     depends_on:
-      local-bot-api:
-        condition: service_started
       redis:
         condition: service_healthy
     expose:
@@ -86,9 +83,10 @@ services:
       bot:
         condition: service_healthy
 
+
 volumes:
+  tg_api_data:
   redis_data:
   app_data:
-  telegram_bot_api_data:
   caddy_data:
   caddy_config:

@@ -7,7 +7,6 @@ from aiohttp import web
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -56,26 +55,30 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         if item["kind"] != "file":
             raise RuntimeError("catalog item is not a file")
 
-        # Fast path: if we have a cached Telegram file_id, resend without hitting storage.
+        # Download to a temporary file (spool). Deleted immediately after send.
+        # Fast-path: if Telegram file_id is cached, send without re-downloading.
         if item.get("tg_file_id"):
             try:
-                await bot.send_document(
+                msg = await bot.send_document(
                     chat_id=job["tg_chat_id"],
                     document=item["tg_file_id"],
                     caption=item["title"],
                 )
+                # Refresh cache from Telegram response (file_id may change).
+                if getattr(msg, "document", None):
+                    await db_mod.set_catalog_item_tg_file(
+                        db, item_id=item["id"],
+                        tg_file_id=msg.document.file_id,
+                        tg_file_unique_id=getattr(msg.document, "file_unique_id", None),
+                    )
                 await db_mod.set_job_state(db, job_id, "succeeded")
                 JOBS_SUCCEEDED.inc()
-                log.info("job_succeeded_from_cache", job_id=job_id)
+                log.info("job_succeeded", job_id=job_id, mode="tg_file_id")
                 return
-            except TelegramBadRequest:
-                # Cached file_id became invalid (rare, but happens). Drop cache and fallback.
-                await db_mod.clear_catalog_item_tg_file(db, item["id"])
-            except Exception:
-                # Any other error: fall back to normal flow.
-                pass
-
-        # Download to a temporary file (spool). Deleted immediately after send.
+            except Exception as e:
+                # If cached file_id became invalid, drop it and retry via download/upload.
+                log.warning("tg_file_id_failed", job_id=job_id, err=str(e))
+                await db_mod.set_catalog_item_tg_file(db, item_id=item["id"], tg_file_id=None, tg_file_unique_id=None)
         with tempfile.NamedTemporaryFile(prefix="adaspeas_", suffix=".bin", delete=True) as tmp:
             async for chunk in storage.stream_download(item["yandex_id"]):
                 tmp.write(chunk)
@@ -86,10 +89,13 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                 document=FSInputFile(tmp.name),
                 caption=item["title"],
             )
-
-        # Save file_id for future requests
-        if msg.document and msg.document.file_id:
-            await db_mod.set_catalog_item_tg_file(db, item["id"], msg.document.file_id, getattr(msg.document, "file_unique_id", None))
+            if getattr(msg, "document", None):
+                await db_mod.set_catalog_item_tg_file(
+                    db,
+                    item_id=item["id"],
+                    tg_file_id=msg.document.file_id,
+                    tg_file_unique_id=getattr(msg.document, "file_unique_id", None),
+                )
 
         await db_mod.set_job_state(db, job_id, "succeeded")
         JOBS_SUCCEEDED.inc()
@@ -115,8 +121,8 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
 async def worker_loop(settings: Settings) -> None:
     setup_logging(settings.log_level)
 
-    if settings.use_local_bot_api:
-        api = TelegramAPIServer.from_base(settings.local_bot_api_base, is_local=True)
+    if getattr(settings, "use_local_bot_api", 0):
+        api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8082"), is_local=True)
         session = AiohttpSession(api=api)
         bot = Bot(token=settings.bot_token, session=session)
     else:

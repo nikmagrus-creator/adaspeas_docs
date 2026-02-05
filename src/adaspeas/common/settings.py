@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     # Local Bot API (optional)
-    local_bot_api_base: str = "http://local-bot-api:8082"
+    local_bot_api_base: str = "http://local-bot-api:8081"
     use_local_bot_api: int = 0
 
     # Observability

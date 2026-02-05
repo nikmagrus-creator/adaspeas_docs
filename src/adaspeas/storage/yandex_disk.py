@@ -24,33 +24,37 @@ class YandexDiskClient:
                 raise RuntimeError("Yandex Disk: missing href")
             return str(href)
 
+    async def list_dir(self, path: str, *, limit: int = 200, offset: int = 0) -> list[dict]:
+        """List items in a Yandex.Disk folder (one level).
 
-    async def list_dir(self, path: str) -> list[dict]:
-        """List items in a Yandex.Disk folder (one level), with pagination.
-
-        The API supports limit/offset; the default limit is small.
-        We use a larger limit and paginate until all items are fetched.
+        Returns raw item dicts from Yandex API (name, path, type, size, modified...).
         """
-        out: list[dict] = []
-        limit = 200
-        offset = 0
         async with httpx.AsyncClient(timeout=30.0) as client:
-            while True:
-                resp = await client.get(
-                    f"{self._base}/resources",
-                    headers=self._headers,
-                    params={"path": path, "limit": limit, "offset": offset},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                embedded = data.get("_embedded") or {}
-                items = embedded.get("items") or []
-                if not items:
-                    break
-                out.extend(list(items))
-                if len(items) < limit:
-                    break
-                offset += limit
+            resp = await client.get(
+                f"{self._base}/resources",
+                headers=self._headers,
+                params={"path": path, "limit": int(limit), "offset": int(offset)},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            embedded = data.get("_embedded") or {}
+            items = embedded.get("items") or []
+            return list(items)
+
+    async def list_dir_all(self, path: str, *, batch: int = 200, max_items: int | None = None) -> list[dict]:
+        """List all items in a folder with limit/offset pagination."""
+        out: list[dict] = []
+        offset = 0
+        while True:
+            items = await self.list_dir(path, limit=batch, offset=offset)
+            if not items:
+                break
+            out.extend(items)
+            offset += len(items)
+            if max_items is not None and len(out) >= max_items:
+                return out[:max_items]
+            if len(items) < batch:
+                break
         return out
 
     async def stream_download(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
