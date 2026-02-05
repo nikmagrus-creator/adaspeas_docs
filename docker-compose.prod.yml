@@ -3,90 +3,116 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
-      - redis_data:/data
+    - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+      - CMD
+      - redis-cli
+      - ping
       interval: 5s
       timeout: 3s
       retries: 10
-
   local-bot-api:
     image: aiogram/telegram-bot-api:latest
-    profiles: ["localbotapi"]
+    profiles:
+    - localbotapi
     restart: unless-stopped
     env_file:
-      - .env
+    - .env
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
-      TELEGRAM_LOCAL: "1"
+      TELEGRAM_LOCAL: '1'
     volumes:
-      - tg_api_data:/var/lib/telegram-bot-api
-
-
+    - tg_api_data:/var/lib/telegram-bot-api
+  init-app-data:
+    image: alpine:3.19
+    restart: unless-stopped
+    command:
+    - sh
+    - -c
+    - mkdir -p /data && chown -R ${APP_UID:-1000}:${APP_GID:-1000} /data && sleep
+      infinity
+    volumes:
+    - app_data:/data
   bot:
     image: ${IMAGE}
     restart: unless-stopped
     env_file:
-      - .env
+    - .env
     volumes:
-      - app_data:/data
+    - app_data:/data
     depends_on:
+      init-app-data:
+        condition: service_started
       redis:
         condition: service_healthy
     expose:
-      - "8080"
+    - '8080'
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',
+        timeout=2).read()
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 15s
-
+    user: ${APP_UID:-1000}:${APP_GID:-1000}
   worker:
     image: ${IMAGE}
     restart: unless-stopped
-    command: ["python", "-m", "adaspeas.worker.main"]
+    command:
+    - python
+    - -m
+    - adaspeas.worker.main
     env_file:
-      - .env
+    - .env
     volumes:
-      - app_data:/data
+    - app_data:/data
     depends_on:
+      init-app-data:
+        condition: service_started
       redis:
         condition: service_healthy
     expose:
-      - "8081"
+    - '8081'
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2).read()"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health',
+        timeout=2).read()
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 15s
-
+    user: ${APP_UID:-1000}:${APP_GID:-1000}
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     env_file:
-      - .env
+    - .env
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
       METRICS_USER: ${METRICS_USER}
       METRICS_PASS: ${METRICS_PASS}
     ports:
-      - "80:80"
-      - "443:443"
+    - 80:80
+    - 443:443
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+    - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    - caddy_data:/data
+    - caddy_config:/config
     depends_on:
       bot:
         condition: service_healthy
-
-
 volumes:
-  tg_api_data:
-  redis_data:
-  app_data:
-  caddy_data:
-  caddy_config:
+  tg_api_data: null
+  redis_data: null
+  app_data: null
+  caddy_data: null
+  caddy_config: null
