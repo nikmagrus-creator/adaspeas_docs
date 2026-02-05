@@ -108,6 +108,38 @@ Living docs проекта (минимальный набор):
 
 ---
 
+### 5.2) Стандартный блок команд (применение пакета + push)
+Команды должны быть **минимальными**, выполняться целиком в GNOME Terminal/VTE без самозакрытия окна:
+- **не** использовать `set -e`, **не** делать `exit`
+- для остановки использовать `return` (если запускается в текущей оболочке)
+
+Шаблон (каноничные пути):  
+```bash
+cd /home/nik/projects/adaspeas || return
+test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; return; }
+
+PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz"
+
+tar -xzf "$PACK" -C /home/nik/projects/adaspeas
+
+# удалить то, что пакет пометил как удалённое (если файл существует)
+test -f .pack/deleted.txt && while IFS= read -r p; do
+  test -n "$p" || continue
+  git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
+done < .pack/deleted.txt
+
+git add -A
+git commit -m "<MESSAGE>"
+git push
+```
+
+Требования к пакету:
+- Формат: **tar.gz**
+- Содержит **только** изменённые файлы/папки (с сохранением путей)
+- Если нужны удаления: добавить `.pack/deleted.txt` (список путей, по одному на строку)
+- Запрещено включать в пакет: `.git/`, секреты (`.env`, ключи, токены), большие артефакты сборки, кэши.
+
+
 ## 6) Мини-checklist перед выдачей пакета
 Перед тем как объявить “готово”, ассистент проверяет:
 - пути корректны (repo/archives/VPS)
