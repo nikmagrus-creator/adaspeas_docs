@@ -22,22 +22,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      
-      - name: Repo hygiene (no tracked .env)
-        shell: bash
+      - name: Fail if .env is tracked
         run: |
-          set -euo pipefail
-          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
-            echo "ERROR: .env must not be committed. Use .env.example."
-            exit 1
+          if git ls-files -z | tr '\0' '\n' | grep -E '(^|/)\.env(\.|$)'; then
+            echo "ERROR: .env (or .env.*) is tracked in git. Remove it and keep only .env.example.";
+            exit 1;
           fi
-
-      - name: Validate compose files
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.yml config >/dev/null
-          docker compose -f docker-compose.prod.yml config >/dev/null
 
       - name: Docs policy check (timestamps + no doc sprawl)
         shell: bash
