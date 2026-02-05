@@ -51,11 +51,11 @@ jobs:
           for f in ${living_docs}; do
             if echo "${changed_files}" | grep -qx "${f}"; then
               echo "Validating living doc: ${f}"
-              grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} UTC' "${f}"
+              grep -q '^Актуально на: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\} MSK' "${f}"
               grep -q '^## История изменений' "${f}"
 
-              # Table must contain at least one data row with UTC
-              if ! grep -E '^[|].*UTC.*[|]' "${f}" >/dev/null; then
+              # Table must contain at least one data row with MSK
+              if ! grep -E '^[|].*MSK.*[|]' "${f}" >/dev/null; then
                 echo "ERROR: ${f} must contain at least one history row in the table."
                 exit 1
               fi
