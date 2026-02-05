@@ -27,3 +27,19 @@ docker compose up --build
 - `/health` → 200 `{"ok": true}`
 - `/metrics` → 401 без логина (Basic Auth через Caddy)
 - `/` → 302 на `/health` (Caddy)
+
+
+## Быстрый старт (локально)
+
+```bash
+cd /home/nik/projects/adaspeas
+make env
+make up
+```
+
+Smoke-check:
+
+```bash
+curl -sSf http://localhost:8080/health
+curl -sSf http://localhost:8080/metrics
+```

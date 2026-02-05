@@ -11,7 +11,11 @@ services:
       retries: 10
 
   bot:
-    build: .
+    build:
+      context: .
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.bot.main"]
     env_file: .env
@@ -30,7 +34,11 @@ services:
       start_period: 10s
 
   worker:
-    build: .
+    build:
+      context: .
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.worker.main"]
     env_file: .env

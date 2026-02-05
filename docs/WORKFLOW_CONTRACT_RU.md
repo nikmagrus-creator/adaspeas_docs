@@ -120,6 +120,8 @@ test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first.";
 
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz"
 
+rm -rf .git .env
+
 tar -xzf "$PACK" -C /home/nik/projects/adaspeas
 
 # удалить то, что пакет пометил как удалённое (если файл существует)

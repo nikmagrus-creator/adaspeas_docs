@@ -22,6 +22,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      
+      - name: Repo hygiene (no tracked .env)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "ERROR: .env must not be committed. Use .env.example."
+            exit 1
+          fi
+
+      - name: Validate compose files
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config >/dev/null
+          docker compose -f docker-compose.prod.yml config >/dev/null
+
       - name: Docs policy check (timestamps + no doc sprawl)
         shell: bash
         run: |
