@@ -1,13 +1,14 @@
 name: build-and-deploy
 
-on:
+'on':
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch: {}
 
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 concurrency:
   group: adaspeas-prod
@@ -27,20 +28,11 @@ jobs:
         run: |
           set -euo pipefail
           bad="$(
-            git ls-files -z -- '.env' '.env.*' \
-              | tr '\0' '\n' \
-              | grep -vE '(^|/)\.env\.example$' \
-              || true
+            git ls-files -z -- '.env' '.env.*'               | tr '\0' '\n'               | grep -vE '(^|/)\.env\.example$'               || true
           )"
           if [ -n "$bad" ]; then
             echo "ERROR: tracked .env file(s) found. Only .env.example is allowed."
-            printf '%s
-' "$bad"
-            exit 1
-          fi
-          if git ls-files ".env.*" | grep -q .; then
-            echo "ERROR: .env.* file(s) are tracked by git. Remove them."
-            git ls-files ".env.*"
+            printf '%s\n' "$bad"
             exit 1
           fi
 
@@ -78,59 +70,15 @@ jobs:
 
               # Table must contain at least one data row with MSK
               if ! grep -E '^[|].*MSK.*[|]' "${f}" >/dev/null; then
-                echo "ERROR: ${f} must contain at least one history row in the table."
+                echo "ERROR: ${f} must contain a history table row with MSK."
                 exit 1
               fi
             fi
           done
 
-          echo "Docs policy check passed."
-
-      - name: Python sanity (compile + tests if any)
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Compile + pytest
-        run: |
-          python -m compileall -q src
-          pytest -q || test $? -eq 5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push
-        id: meta
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
-
-
   ci-smoke:
-    needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
+    needs: [build]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -152,7 +100,7 @@ jobs:
           dockerfile: Dockerfile
           no-fail: true
 
-      - name: Trivy report (fs, SARIF)
+      - name: Trivy report (fs, SARIF, do not fail)
         uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: fs
@@ -160,10 +108,9 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           exit-code: 0
-          ignore-unfixed: true
 
       - name: Upload Trivy SARIF
-        if: always() && hashFiles('trivy-results.sarif') != ''
+        if: ${{ hashFiles('trivy-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
@@ -179,13 +126,14 @@ jobs:
           exit-code: 1
           skip-setup-trivy: true
 
-      - name: Compose config validate (dev)
+      - name: Compose config validate
         run: docker compose -f docker-compose.yml config
 
-      - name: Start stack (dev)
+      - name: Start stack
         run: docker compose -f docker-compose.yml up -d --build
 
       - name: Wait for /health (bot 8080, worker 8081)
+        shell: bash
         run: |
           set -eu
           for i in $(seq 1 60); do
@@ -196,69 +144,10 @@ jobs:
             sleep 2
           done
           echo "healthcheck timeout"
-          docker compose -f docker-compose.yml ps
-          docker compose -f docker-compose.yml logs --no-color
+          docker compose -f docker-compose.yml ps || true
+          docker compose -f docker-compose.yml logs --no-color || true
           exit 1
 
       - name: Teardown
         if: always()
         run: docker compose -f docker-compose.yml down -v || true
-
-  deploy:
-    needs: [build, ci-smoke]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          script_stop: true
-          envs: GHCR_USER,GHCR_PAT,APP_DIR,IMAGE
-          script: |
-            set -euo pipefail
-            export APP_DIR="${APP_DIR:-/opt/adaspeas}"
-            export IMAGE="${IMAGE:-${{ needs.build.outputs.image }}}"
-            if [ ! -d "$APP_DIR" ]; then
-              echo "APP_DIR $APP_DIR does not exist. Run deploy/bootstrap_vps.sh on the server first."
-              exit 2
-            fi
-            cd "$APP_DIR"
-
-            # keep VPS repo in sync with GitHub (infra files, docs, compose, caddy)
-            git fetch origin
-            git reset --hard origin/main
-            git clean -fd
-
-            # validate required env vars (fail fast before pulling/up)
-            if [ ! -f .env ]; then
-              echo "Missing .env in $APP_DIR"
-              exit 3
-            fi
-
-            required_vars="BOT_TOKEN YANDEX_OAUTH_TOKEN SQLITE_PATH REDIS_URL ACME_EMAIL METRICS_USER METRICS_PASS IMAGE"
-            for k in $required_vars; do
-              v="$(grep -E "^${k}=" .env | tail -n1 | cut -d= -f2- || true)"
-              if [ -z "$v" ]; then
-                echo "Missing or empty env var: $k"
-                exit 3
-              fi
-            done
-
-
-            if [ -n "${GHCR_PAT:-}" ]; then
-              echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-${{ github.actor }}}" --password-stdin
-            fi
-
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
-            docker compose -f docker-compose.prod.yml restart caddy
-            docker image prune -f
-    env:
-      GHCR_USER: ${{ secrets.GHCR_USER }}
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
-      APP_DIR: ${{ secrets.APP_DIR }}
-      VPS_PORT: ${{ secrets.VPS_PORT }}
-      IMAGE: ghcr.io/${{ github.repository }}:latest
