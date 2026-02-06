@@ -122,7 +122,7 @@ async def worker_loop(settings: Settings) -> None:
     setup_logging(settings.log_level)
 
     if getattr(settings, "use_local_bot_api", 0):
-        api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8082"), is_local=True)
+        api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
         session = AiohttpSession(api=api)
         bot = Bot(token=settings.bot_token, session=session)
     else:

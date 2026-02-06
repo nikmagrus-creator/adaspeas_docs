@@ -1,6 +1,6 @@
 # TECH_SPEC (RU): архитектура и контракты системы
 
-Актуально на: 2026-02-06 00:10 MSK
+Актуально на: 2026-02-06 12:45 MSK
 
 Документ описывает целевую архитектуру связки Telegram ↔ VPS ↔ Яндекс.Диск и то, что должно быть истинным (инварианты). Подробные правила процесса см. в `docs/WORKFLOW_CONTRACT_RU.md`, продуктовые цели — в `docs/PRD_RU.md`.
 
@@ -8,7 +8,7 @@
 ## 0) Карта кода (как сейчас)
 
 - Telegram UI (aiogram): `src/adaspeas/bot/main.py`
-- Worker (RQ/Redis): `src/adaspeas/worker/main.py`
+- Worker (очередь Redis): `src/adaspeas/worker/main.py`
 - Yandex Disk client: `src/adaspeas/storage/yandex_disk.py`
 - SQLite schema / DB: `src/adaspeas/common/db.py`
 - Config: `src/adaspeas/common/settings.py`
@@ -150,27 +150,43 @@ UI строится как дерево:
 
 ## 8) Конфигурация (env)
 
-Минимальный набор (целевой):
-- `BOT_TOKEN`
-- `ADMIN_IDS` (список)
-- `ADMIN_CHAT_ID` (канал/группа для оповещений)
-- `YD_OAUTH_TOKEN`
-- `YD_ROOT_PATH` (например `Zkvpr`)
-- `REDIS_URL`
-- `DATABASE_PATH`
+Каноничный список переменных см. `.env.example`.
 
-Для Local Bot API:
-- `TELEGRAM_API_ID`
-- `TELEGRAM_API_HASH`
-- `LOCAL_BOT_API_URL` (например `http://telegram-bot-api:8081`)
+Минимум для запуска (dev/CI):
+- `BOT_TOKEN`
+- `ADMIN_USER_IDS` (опционально, CSV)
+- `STORAGE_MODE` (`yandex` | `local`)
+- `SQLITE_PATH`
+- `REDIS_URL`
+
+Если `STORAGE_MODE=yandex`:
+- `YANDEX_OAUTH_TOKEN`
+- `YANDEX_BASE_PATH` (например `/Zkvpr`)
+
+Если `STORAGE_MODE=local`:
+- `LOCAL_STORAGE_ROOT`
+
+Local Bot API Server (опционально, но нужен для файлов > 50 MB):
+- `USE_LOCAL_BOT_API=1`
+- `LOCAL_BOT_API_BASE` (по умолчанию `http://local-bot-api:8081`)
+- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` (нужны для запуска сервиса `local-bot-api`)
+
+Prod (Caddy/HTTPS/метрики):
+- `ACME_EMAIL`, `METRICS_USER`, `METRICS_PASS`, `IMAGE`
 
 
 ## 9) Известные разрывы (gap) относительно текущего кода
 
-- `/categories` сейчас печатает текстовый список, без inline‑навигации.
-- Синхронизация каталога выполняется синхронно при команде `/categories`.
-- В `yandex_disk.list_dir` нет полноценной пагинации (offset остаётся 0).
-- Нет модели доступа (status/expiry), нет внятных ограничений для гостя.
-- Нет кэширования `tg_file_id`.
+- `/categories` пока делает синхронное чтение хранилища и печатает текстовый список (без inline‑навигации и без редактирования одного сообщения).
+- Нет фоновой периодической синхронизации каталога по расписанию (SQLite как кэш есть, но обновляется “по запросу”).
+- Нет модели доступа пользователей (status/expiry) и админ‑инструментов управления доступом.
+- Нет админ‑уведомлений об ошибках/истечениях (как минимум: отправка всем `ADMIN_USER_IDS`).
+- Нет аудита скачиваний и админ‑статистики.
 
-Закрытие этих разрывов и их порядок — в `docs/ROADMAP_RU.md`.
+Закрытие этих разрывов и порядок — в `docs/ROADMAP_RU.md` и ADR.
+
+## История изменений
+| Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
+|---|---|---|---|---|
+| 2026-02-06 00:10 MSK | ChatGPT | doc | Зафиксирована базовая архитектура и лимиты Telegram для “библиотеки” | |
+| 2026-02-06 12:45 MSK | ChatGPT | doc | Синхронизированы названия env/компонентов с кодом и уточнены текущие gap | |

@@ -87,3 +87,24 @@
 Следующие шаги:
 - Inline‑каталог (кнопки, назад, страницы) + перенос синхронизации каталога в фон (SQLite как кэш).
 - После UI: модель доступа (30 дней по умолчанию, ручное продление админом) и аудит скачиваний.
+### 2026-02-06 12:45 MSK
+Цель: закрыть коллизии между кодом/доками и закрепить дисциплину фиксации изменений/идей.
+
+Что сделано:
+- Починен fallback порт Local Bot API в bot/worker (8081 вместо 8082).
+- Деплой: добавлена логика автоподъёма Compose profile `localbotapi`, если `USE_LOCAL_BOT_API=1` + проверка `TELEGRAM_API_ID/HASH`.
+- CI: добавлен guard “изменил код/инфру → обнови CHANGELOG или CHATLOG”.
+- Документация синхронизирована с реальными env‑именами из `.env.example` (TECH/OPS/CONTRACT/ROADMAP).
+
+Решения:
+- ADR-002 переведён в Accepted (Local Bot API как базовый компонент для файлов > 50 MB).
+- ADR-003: фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR.
+
+Документы обновлены:
+- WORKFLOW_CONTRACT/TECH_SPEC/OPS_RUNBOOK/ROADMAP/CHANGELOG/CHATLOG/ADR-002/ADR-003 + PR template + deploy workflow.
+
+Следующие шаги:
+- Inline‑каталог (кнопки, назад, страницы).
+- Перенос синхронизации каталога в фон (worker schedule + метка “обновлено …”).
+- Модель доступа (pending/active/expired) + уведомления и аудит скачиваний.
+- e2e/ручной runbook тест на файл > 50 MB через Local Bot API.

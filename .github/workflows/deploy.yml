@@ -79,6 +79,20 @@ jobs:
             fi
           done
 
+          # If code/infra changed, require CHANGELOG.md or docs/CHATLOG_RU.md updated
+          impact="$(
+            echo "${changed_files}" \
+              | grep -E '^(src/|deploy/|Dockerfile$|docker-compose(\.prod)?\.yml$|requirements\.txt$|\.github/workflows/)' \
+              || true
+          )"
+          if [ -n "${impact}" ]; then
+            if ! echo "${changed_files}" | grep -qx "CHANGELOG.md" && ! echo "${changed_files}" | grep -qx "docs/CHATLOG_RU.md"; then
+              echo "ERROR: Code/infra changed but CHANGELOG.md or docs/CHATLOG_RU.md not updated."
+              echo "${impact}"
+              exit 1
+            fi
+          fi
+
           echo "Docs policy check passed."
 
       - name: Python sanity (compile + tests if any)
@@ -233,15 +247,50 @@ jobs:
               exit 3
             fi
 
-            required_vars="BOT_TOKEN YANDEX_OAUTH_TOKEN SQLITE_PATH REDIS_URL ACME_EMAIL METRICS_USER METRICS_PASS IMAGE"
-            for k in $required_vars; do
-              v="$(grep -E "^${k}=" .env | tail -n1 | cut -d= -f2- || true)"
+            get_env() {
+              grep -E "^${1}=" .env | tail -n1 | cut -d= -f2- || true
+            }
+
+            must() {
+              k="$1"
+              v="$(get_env "$k")"
               if [ -z "$v" ]; then
                 echo "Missing or empty env var: $k"
                 exit 3
               fi
-            done
+            }
 
+            # always required
+            must BOT_TOKEN
+            must SQLITE_PATH
+            must REDIS_URL
+            must ACME_EMAIL
+            must METRICS_USER
+            must METRICS_PASS
+            must IMAGE
+
+            storage_mode="$(get_env STORAGE_MODE)"
+            if [ -z "$storage_mode" ]; then storage_mode="yandex"; fi
+
+            if [ "$storage_mode" = "yandex" ]; then
+              must YANDEX_OAUTH_TOKEN
+              must YANDEX_BASE_PATH
+            elif [ "$storage_mode" = "local" ]; then
+              must LOCAL_STORAGE_ROOT
+            else
+              echo "Unknown STORAGE_MODE=$storage_mode (expected: yandex|local)"
+              exit 3
+            fi
+
+            if [ "$(get_env USE_LOCAL_BOT_API)" = "1" ]; then
+              must TELEGRAM_API_ID
+              must TELEGRAM_API_HASH
+              if [ -z "${COMPOSE_PROFILES:-}" ]; then
+                export COMPOSE_PROFILES="localbotapi"
+              else
+                export COMPOSE_PROFILES="${COMPOSE_PROFILES},localbotapi"
+              fi
+            fi
 
             if [ -n "${GHCR_PAT:-}" ]; then
               echo "$GHCR_PAT" | docker login ghcr.io -u "${GHCR_USER:-${{ github.actor }}}" --password-stdin
@@ -251,9 +300,9 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             docker compose -f docker-compose.prod.yml restart caddy
             docker image prune -f
-    env:
-      GHCR_USER: ${{ secrets.GHCR_USER }}
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
-      APP_DIR: ${{ secrets.APP_DIR }}
-      VPS_PORT: ${{ secrets.VPS_PORT }}
-      IMAGE: ghcr.io/${{ github.repository }}:latest
+        env:
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          IMAGE: ghcr.io/${{ github.repository }}:latest
