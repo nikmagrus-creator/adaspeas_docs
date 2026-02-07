@@ -1,7 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-07 14:02 MSK
-Этот документ отвечает на вопрос “что делать, когда оно уже работает на VPS и внезапно перестало”. Архитектурные контракты см. в `docs/TECH_SPEC_RU.md`, процесс — в `docs/WORKFLOW_CONTRACT_RU.md`.
+Актуально на: 2026-02-07 15:35 MSK
 
 
 ## 1) Компоненты в проде
@@ -74,6 +73,35 @@ done
 Удаление удалённой ветки через `git push origin :<branch>` соответствует документации git-push.
 
 
+
+## 2.1.2) Если случайно начат cherry-pick/merge и репозиторий “needs merge”
+
+Симптомы:
+- `git status` пишет `needs merge`.
+- В файлах появились маркеры конфликтов вида `<<< HEAD` / `>>> commit`.
+- Скрипт применения паков падает с “Repo dirty”.
+
+Лечение (обычно достаточно отменить незавершённую операцию и вернуть `main` в чистое состояние):
+```bash
+cd /home/nik/projects/adaspeas
+
+# 0) посмотреть состояние
+git status
+
+# 1) отменить незавершённые операции (если есть)
+git cherry-pick --abort 2>/dev/null || true
+git merge --abort 2>/dev/null || true
+
+# 2) вернуть main к удалённому состоянию (жёстко)
+git checkout main
+git fetch origin --prune
+git reset --hard origin/main
+
+# 3) (опционально) удалить мусорные неотслеживаемые файлы
+# git clean -fd
+```
+
+Примечание: если у тебя были важные локальные изменения, сначала сделай `git stash`.
 
 ## 2.2) Симптом: "sqlite3.OperationalError: attempt to write a readonly database"
 

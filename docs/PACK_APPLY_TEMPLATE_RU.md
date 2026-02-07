@@ -7,6 +7,10 @@
 - Если есть удаления, пакет содержит файл `.pack/deleted.txt` (по одному пути на строку).
 - Команды должны быть:
 
+Дополнительно:
+- Инкрементальный pack **не должен** содержать каталог `.git/` (это служебное состояние твоей машины).
+- Если случайно прислали полный zip репозитория, **игнорируй** `.git/` и сначала приведи рабочее дерево в чистое состояние (см. `docs/OPS_RUNBOOK_RU.md` раздел про отмену merge/cherry-pick).
+
 
 Контекст путей (зафиксировано для повторяемости):
 - Local (Linux Mint): репозиторий `/home/nik/projects/adaspeas`
@@ -24,16 +28,20 @@
 
 ```bash
 cd /home/nik/projects/adaspeas &&
-test -d .git || { echo "No .git here (clone repo first)"; false; } &&
-# ВАЖНО: в репозитории используем ТОЛЬКО ветку main (без feature-веток).
-test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Not on main. Switch to main."; false; } &&
-# Работаем линейно: сначала подтянуть изменения без merge-коммитов.
+test -d .git || { echo "Не репозиторий (.git не найден). Склонируй adaspeas_docs."; false; } &&
+# В репозитории разрешена только ветка main.
+git checkout main &&
+# Работаем линейно: подтянуть изменения без merge-коммитов.
 git pull --ff-only &&
+# Нельзя продолжать, если есть незавершённый merge/cherry-pick (иначе в файлах будут маркеры конфликтов).
+test ! -f .git/CHERRY_PICK_HEAD || { echo "Cherry-pick in progress. Выполни: git cherry-pick --abort"; false; } &&
+test ! -f .git/MERGE_HEAD || { echo "Merge in progress. Выполни: git merge --abort"; false; } &&
 # После pull repo должен оставаться чистым
-test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; false; } &&
+test -z "$(git status --porcelain)" || { echo "Repo dirty. Resolve/commit/stash first."; git status --porcelain; false; } &&
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
 test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
 tar -xzf "$PACK" -C . &&
+# применить удаления (контракт)
 if test -f .pack/deleted.txt; then
   while IFS= read -r p; do
     test -n "$p" || continue
@@ -43,7 +51,7 @@ fi &&
 rm -rf .pack &&
 # Быстрая валидация compose (если docker установлен)
 if command -v docker >/dev/null 2>&1; then docker compose config >/dev/null; else echo "docker отсутствует, пропускаю docker compose config"; fi &&
-# Тесты (если pytest установлен). Важно: make test может возвращать 5 (no tests) и это считается ОК.
+# Тесты (если pytest установлен)
 if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then make test || true; else echo "pytest отсутствует, пропускаю make test"; fi &&
 git add -A &&
 git status --porcelain &&
@@ -55,7 +63,7 @@ git push origin main
 - `git status --porcelain` после `git add -A` оставлен намеренно: удобно увидеть, что реально изменилось, но он не ломает цепочку.
 - `git rm --ignore-unmatch` безопасен для путей, которые уже отсутствуют, и корректно фиксирует удаления в git.
 
-Актуально на: 2026-02-07 14:02 MSK
+Актуально на: 2026-02-07 15:35 MSK
 
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
