@@ -1,4 +1,16 @@
 services:
+  # init-app-data: one-shot контейнер, который гарантирует, что ./data существует
+  # и принадлежит UID/GID приложения. Это важно при первом запуске: Docker может
+  # создать bind-mount директорию как root:root, из-за чего SQLite (WAL) падает
+  # с "attempt to write a readonly database".
+  init-app-data:
+    image: alpine:3.19
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-lc", "mkdir -p /data && chown -R ${UID:-1000}:${GID:-1000} /data"]
+    volumes:
+      - ./data:/data
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -34,6 +46,8 @@ services:
     volumes:
       - ./data:/data
     depends_on:
+      init-app-data:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     ports:
@@ -57,6 +71,8 @@ services:
     volumes:
       - ./data:/data
     depends_on:
+      init-app-data:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     ports:

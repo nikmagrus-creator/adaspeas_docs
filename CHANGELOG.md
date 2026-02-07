@@ -6,7 +6,6 @@
 ### Added
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
 - docs: ADR-003 (фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR)
-
 ### Changed
 - docs: закреплён обязательный формат PRE-FLIGHT (что подключить/загрузить перед задачей)
 - ops: добавлена секция метрик (/metrics) и требование hashed METRICS_PASS (caddy hash-password)
@@ -21,6 +20,8 @@
 - ci: deploy поднимает Compose profile localbotapi по USE_LOCAL_BOT_API и валидирует TELEGRAM_API_ID/HASH
 - ci: guard: изменения кода/инфры требуют обновления CHANGELOG или CHATLOG
 - docs: синхронизированы env-имена и добавлены истории изменений в живые документы (CONTRACT/TECH/OPS/ROADMAP)
-- fix: /categories и /list не показывают внутренние пути хранилища обычным пользователям (пути видны только админам)
-- ops: / теперь 302 на /health на уровне приложения (bot и worker), чтобы локальный smoke совпадал с продом
-- build: Dockerfile фиксирует PIP_VERSION=26.0.1 (актуальный stable)
+
+### Fixed
+- ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data)
+- ops: в docker-compose.yml добавлен init-app-data для первого запуска (Docker может создать ./data как root:root)
+- docs: уточнены правила запуска на VPS (использовать docker-compose.prod.yml / systemd unit)

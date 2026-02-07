@@ -1,6 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-07 12:00 MSK
+Актуально на: 2026-02-07 12:55 MSK
 Этот документ отвечает на вопрос “что делать, когда оно уже работает на VPS и внезапно перестало”. Архитектурные контракты см. в `docs/TECH_SPEC_RU.md`, процесс — в `docs/WORKFLOW_CONTRACT_RU.md`.
 
 
@@ -24,6 +24,34 @@
 2) Проверить логи bot/worker (ошибки 401/403/429, таймауты, падения).
 3) Если массовые 429/таймауты — временно выключить шумные задачи (уведомления/синхронизацию), оставив базовый UI.
 4) Если сломалась доставка файлов — фиксировать ошибку в аудит и уведомить админов (как минимум: каждому из `ADMIN_USER_IDS`).
+
+## 2.1) Управление на VPS (важно)
+
+На VPS в `/opt/adaspeas` **в проде** нужно использовать `docker-compose.prod.yml` (или systemd unit из `deploy/bootstrap_vps.sh`).
+
+Причина: `docker compose up` без `-f` берёт по умолчанию `docker-compose.yml`, а он рассчитан на локальный запуск и bind‑mount `./data:/data`.
+Если директории `./data` ещё нет, Docker может создать её как `root:root`, и тогда бот/воркер (которые работают не от root) упрутся в ошибку SQLite "attempt to write a readonly database".
+
+Минимальные команды:
+- `make ps-prod` / `make logs-prod` (см. Makefile)
+- или напрямую: `docker compose -f docker-compose.prod.yml ps` / `docker compose -f docker-compose.prod.yml logs -f --tail=200`
+
+## 2.2) Симптом: "sqlite3.OperationalError: attempt to write a readonly database"
+
+Типовой корень:
+- SQLite работает в WAL режиме и должен создавать файлы `*.db-wal` и `*.db-shm` рядом с основной БД.
+- Если директория `/data` или файл БД принадлежат root (или смонтированы read-only), контейнер под пользователем `app` (UID/GID 1000) не сможет писать.
+
+Норма (после этого патча):
+- в `docker-compose.prod.yml` и `docker-compose.yml` есть one-shot сервис `init-app-data`, который делает `mkdir -p /data && chown -R <UID>:<GID> /data` перед стартом bot/worker.
+
+Аварийная мера (если нужно поднять сейчас, но патч ещё не задеплоен):
+
+```bash
+cd /opt/adaspeas
+docker compose -f docker-compose.prod.yml run --rm --user 0:0 bot sh -lc 'chown -R 1000:1000 /data && chmod -R u+rwX,g+rwX /data'
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
+```
 
 
 ## 3) Local Bot API Server (local-bot-api)
@@ -112,5 +140,6 @@ caddy hash-password --plaintext "<пароль>"
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнены админ‑оповещения и добавлена секция метрик (/metrics) с требованием hash-password | |
+| 2026-02-07 12:55 MSK | ChatGPT | ops | Уточнено управление на VPS (prod compose) и добавлен runbook для readonly SQLite + init-app-data | |
 | 2026-02-06 00:10 MSK | ChatGPT | doc | Зафиксированы операции/инциденты и необходимость Local Bot API | |
 | 2026-02-06 12:45 MSK | ChatGPT | doc | Синхронизированы env/Compose profiles и уточнены правила админ‑уведомлений | |

@@ -27,12 +27,12 @@ services:
     - tg_api_data:/var/lib/telegram-bot-api
   init-app-data:
     image: alpine:3.19
-    restart: unless-stopped
+    restart: "no"
+    user: "0:0"
     command:
     - sh
-    - -c
-    - mkdir -p /data && chown -R ${APP_UID:-1000}:${APP_GID:-1000} /data && sleep
-      infinity
+    - -lc
+    - mkdir -p /data && chown -R ${APP_UID:-1000}:${APP_GID:-1000} /data
     volumes:
     - app_data:/data
   bot:
@@ -44,7 +44,7 @@ services:
     - app_data:/data
     depends_on:
       init-app-data:
-        condition: service_started
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     expose:
@@ -74,7 +74,7 @@ services:
     - app_data:/data
     depends_on:
       init-app-data:
-        condition: service_started
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     expose:
