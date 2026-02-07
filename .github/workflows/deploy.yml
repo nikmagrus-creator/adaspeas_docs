@@ -201,6 +201,20 @@ jobs:
             fi
           fi
 
+          # CI smoke использует невалидный по сути токен; чтобы бот не ушёл в crash-loop,
+          # принудительно включаем CI_SMOKE=1 в .env (compose подхватывает его через env_file).
+          if grep -q '^CI_SMOKE=' .env; then
+            sed -i 's/^CI_SMOKE=.*/CI_SMOKE=1/' .env
+          else
+            echo 'CI_SMOKE=1' >> .env
+          fi
+
+          # Подстраховка: если BOT_TOKEN почему-то отсутствует, задаём валидный по формату "digits:string".
+          if ! grep -q '^BOT_TOKEN=' .env; then
+            echo 'BOT_TOKEN=123456789:AABBCCDDEEFFaabbccddeeff1234567890' >> .env
+          fi
+
+
       - name: Dockerfile lint (hadolint)
         uses: hadolint/hadolint-action@v3.1.0
         with:
