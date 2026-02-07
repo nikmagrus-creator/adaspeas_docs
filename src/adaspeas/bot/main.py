@@ -36,6 +36,10 @@ async def make_app() -> web.Application:
         payload = generate_latest()
         return web.Response(body=payload, content_type=CONTENT_TYPE_LATEST)
 
+    async def root(_request: web.Request) -> web.StreamResponse:
+        raise web.HTTPFound("/health")
+
+    app.router.add_get("/", root)
     app.router.add_get("/health", health)
     app.router.add_get("/metrics", metrics)
     return app
@@ -146,7 +150,14 @@ async def main() -> None:
             await m.answer("Каталог пуст.")
             return
 
-        text = "Каталог (первые 50):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]} ({r[3]})" for r in rows])
+        admins = settings.admin_ids_set()
+        is_admin = bool(admins and m.from_user and m.from_user.id in admins)
+
+        if is_admin:
+            text = "Каталог (первые 50, с путями для админа):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]} ({r[3]})" for r in rows])
+        else:
+            # Не светим внутренние пути хранилища обычным пользователям.
+            text = "Каталог (первые 50):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]}" for r in rows])
         await m.answer(text)
 
     @dp.message(Command("seed"))
@@ -190,7 +201,13 @@ async def main() -> None:
         if not rows:
             await m.answer("Каталог пуст. Админ может вызвать /seed.")
             return
-        text = "Каталог:\n" + "\n".join([f"{r[0]}: {r[1]} ({r[2]})" for r in rows])
+        admins = settings.admin_ids_set()
+        is_admin = bool(admins and m.from_user and m.from_user.id in admins)
+
+        if is_admin:
+            text = "Каталог (с путями для админа):\n" + "\n".join([f"{r[0]}: {r[1]} ({r[2]})" for r in rows])
+        else:
+            text = "Каталог:\n" + "\n".join([f"{r[0]}: {r[1]}" for r in rows])
         await m.answer(text)
 
     @dp.message(Command("download"))

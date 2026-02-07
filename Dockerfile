@@ -11,7 +11,7 @@ ARG UID=1000
 ARG GID=1000
 RUN groupadd -g ${GID} app && useradd -l -m -u ${UID} -g ${GID} -s /bin/bash app
 
-ARG PIP_VERSION=26.0
+ARG PIP_VERSION=26.0.1
 RUN python -m pip install --no-cache-dir --upgrade "pip==${PIP_VERSION}"
 
 COPY requirements.txt /app/requirements.txt

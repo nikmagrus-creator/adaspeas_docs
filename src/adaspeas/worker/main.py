@@ -35,6 +35,10 @@ async def make_app() -> web.Application:
         payload = generate_latest()
         return web.Response(body=payload, content_type=CONTENT_TYPE_LATEST)
 
+    async def root(_request: web.Request) -> web.StreamResponse:
+        raise web.HTTPFound("/health")
+
+    app.router.add_get("/", root)
     app.router.add_get("/health", health)
     app.router.add_get("/metrics", metrics)
     return app
