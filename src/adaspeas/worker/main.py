@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+from datetime import datetime, timezone
 import tempfile
 
 from aiohttp import web
@@ -44,6 +46,74 @@ async def make_app() -> web.Application:
     return app
 
 
+async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path: str, *, max_nodes: int = 5000) -> int:
+    # Walk storage tree and upsert items into SQLite.
+    # Designed for background execution in worker; bot UI reads only SQLite.
+    root = (root_path or '/').rstrip('/') or '/'
+
+    def clamp_child(p: str) -> bool:
+        if root == '/':
+            return p.startswith('/')
+        rp = root.rstrip('/')
+        return p == rp or p.startswith(rp + '/')
+
+    queue = deque([root])
+    seen: set[str] = set()
+    upserted = 0
+
+    # Ensure root exists
+    await db_mod.upsert_catalog_item(
+        db,
+        path=root,
+        kind='folder',
+        title='Каталог',
+        yandex_id=root,
+        parent_path=None,
+    )
+
+    while queue and upserted < max_nodes:
+        cur_path = (queue.popleft() or '/').rstrip('/') or '/'
+        if cur_path in seen:
+            continue
+        seen.add(cur_path)
+
+        items = await storage.list_dir(cur_path)
+        for it in items:
+            typ = str(it.get('type') or '').strip().lower()
+            kind = 'folder' if typ == 'dir' else 'file'
+            child_path = str(it.get('path') or '').strip()
+            if not child_path:
+                continue
+            if not clamp_child(child_path):
+                continue
+
+            title = str(it.get('name') or '')
+            if not title:
+                title = child_path.rstrip('/').rsplit('/', 1)[-1] or child_path
+
+            yandex_id = it.get('resource_id') or child_path
+            size = it.get('size')
+
+            await db_mod.upsert_catalog_item(
+                db,
+                path=child_path,
+                kind=kind,
+                title=title,
+                yandex_id=str(yandex_id),
+                size_bytes=int(size) if isinstance(size, int) else None,
+                parent_path=cur_path,
+            )
+            upserted += 1
+
+            if kind == 'folder':
+                queue.append(child_path)
+
+            if upserted >= max_nodes:
+                break
+
+    return upserted
+
+
 async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, r, job_id: int) -> None:
     job = await db_mod.fetch_job(db, job_id)
 
@@ -51,10 +121,38 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
     if job["state"] in {"succeeded", "failed", "cancelled"}:
         return
 
+    job_type = (job.get('job_type') or 'download').strip().lower()
+
     await db_mod.set_job_state(db, job_id, "running")
     JOBS_RUNNING.inc()
 
     try:
+        if job_type == 'sync_catalog':
+            # Root path is stored in catalog_items.path for the root folder job.
+            try:
+                root_item = await db_mod.fetch_catalog_item(db, job["catalog_item_id"])
+                root_path = str(root_item.get('path') or settings.yandex_base_path or '/')
+            except Exception:
+                root_path = str(settings.yandex_base_path or '/')
+
+            n = await sync_catalog(settings, storage, db, root_path)
+            ts = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            await db_mod.set_meta(db, 'catalog_last_sync_at', ts)
+            # Optional: notify the requester (admin). Never fail the job because of Telegram send.
+            try:
+                await bot.send_message(
+                    chat_id=job["tg_chat_id"],
+                    text=f"Синхронизация каталога завершена. Элементов обработано: {n}.\nОбновлено: {ts}",
+                )
+            except Exception:
+                pass
+
+            await db_mod.set_job_state(db, job_id, "succeeded")
+            JOBS_SUCCEEDED.inc()
+            log.info('job_succeeded', job_id=job_id, mode='sync_catalog', items=n)
+            return
+
+        # Default: download job
         item = await db_mod.fetch_catalog_item(db, job["catalog_item_id"])
         if item["kind"] != "file":
             raise RuntimeError("catalog item is not a file")
@@ -71,7 +169,8 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                 # Refresh cache from Telegram response (file_id may change).
                 if getattr(msg, "document", None):
                     await db_mod.set_catalog_item_tg_file(
-                        db, item_id=item["id"],
+                        db,
+                        item_id=item["id"],
                         tg_file_id=msg.document.file_id,
                         tg_file_unique_id=getattr(msg.document, "file_unique_id", None),
                     )
@@ -83,6 +182,7 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                 # If cached file_id became invalid, drop it and retry via download/upload.
                 log.warning("tg_file_id_failed", job_id=job_id, err=str(e))
                 await db_mod.set_catalog_item_tg_file(db, item_id=item["id"], tg_file_id=None, tg_file_unique_id=None)
+
         with tempfile.NamedTemporaryFile(prefix="adaspeas_", suffix=".bin", delete=True) as tmp:
             async for chunk in storage.stream_download(item["yandex_id"]):
                 tmp.write(chunk)

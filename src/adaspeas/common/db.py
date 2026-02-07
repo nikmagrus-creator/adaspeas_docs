@@ -72,10 +72,24 @@ ALTER TABLE catalog_items ADD COLUMN parent_path TEXT;
 CREATE INDEX IF NOT EXISTS idx_catalog_parent_path ON catalog_items(parent_path);
 """
 
-TARGET_SCHEMA_VERSION = 3
+
+# v4: job types (download/sync) + simple meta key-value storage.
+MIGRATION_V4 = """
+ALTER TABLE jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'download';
+
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_type_state ON jobs(job_type, state);
+"""
+
+TARGET_SCHEMA_VERSION = 4
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
+    4: MIGRATION_V4,
 }
 
 
@@ -137,13 +151,14 @@ async def insert_job(
     tg_user_id: int,
     catalog_item_id: int,
     request_id: str,
+    job_type: str = 'download',
 ) -> int:
     cur = await db.execute(
         """
-        INSERT INTO jobs(tg_chat_id, tg_user_id, catalog_item_id, state, request_id)
-        VALUES (?, ?, ?, 'queued', ?)
+        INSERT INTO jobs(tg_chat_id, tg_user_id, catalog_item_id, state, request_id, job_type)
+        VALUES (?, ?, ?, 'queued', ?, ?)
         """,
-        (tg_chat_id, tg_user_id, catalog_item_id, request_id),
+        (tg_chat_id, tg_user_id, catalog_item_id, request_id, job_type),
     )
     await db.commit()
     return int(cur.lastrowid)
@@ -186,7 +201,7 @@ async def bump_attempt(db: aiosqlite.Connection, job_id: int, last_error: str) -
 async def fetch_job(db: aiosqlite.Connection, job_id: int) -> dict:
     cur = await db.execute(
         """
-        SELECT id, tg_chat_id, tg_user_id, catalog_item_id, state, attempt, last_error
+        SELECT id, tg_chat_id, tg_user_id, catalog_item_id, state, attempt, last_error, job_type
         FROM jobs WHERE id=?
         """,
         (job_id,),
@@ -202,6 +217,7 @@ async def fetch_job(db: aiosqlite.Connection, job_id: int) -> dict:
         "state": row[4],
         "attempt": int(row[5]),
         "last_error": row[6],
+        "job_type": row[7] or 'download',
     }
 
 
@@ -322,3 +338,17 @@ async def fetch_children(
         {"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3]}
         for r in rows
     ]
+
+
+async def get_meta(db: aiosqlite.Connection, key: str) -> str | None:
+    cur = await db.execute('SELECT value FROM meta WHERE key=?', (key,))
+    row = await cur.fetchone()
+    return str(row[0]) if row else None
+
+
+async def set_meta(db: aiosqlite.Connection, key: str, value: str) -> None:
+    await db.execute(
+        'INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        (key, value),
+    )
+    await db.commit()

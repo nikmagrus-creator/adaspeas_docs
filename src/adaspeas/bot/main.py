@@ -18,7 +18,6 @@ from adaspeas.common.logging import setup_logging
 from adaspeas.common.settings import Settings
 from adaspeas.common import db as db_mod
 from adaspeas.common.queue import get_redis, enqueue
-from adaspeas.storage import make_storage_client
 
 log = structlog.get_logger()
 
@@ -63,7 +62,8 @@ async def main() -> None:
             BotCommand(command='start', description='Показать справку'),
             BotCommand(command='categories', description='Каталог'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
-            BotCommand(command='download', description='Скачать файл по id из /list')
+            BotCommand(command='download', description='Скачать файл по id из /list'),
+            BotCommand(command='sync', description='(admin) Синхронизировать каталог')
         ])
     except Exception:
         # Never fail bot startup because of Telegram UI cosmetics
@@ -74,13 +74,7 @@ async def main() -> None:
 
     r = await get_redis(settings.redis_url)
 
-    # One storage client for whole bot lifetime (don't create sessions per click).
-    try:
-        storage = make_storage_client(settings)
-    except Exception:
-        storage = None
-
-    # Catalog navigation root.
+    # Catalog navigation root (UI читает только SQLite; синхронизацию делает worker по /sync).
     storage_mode = (getattr(settings, "storage_mode", "yandex") or "yandex").strip().lower()
     root_path = (settings.yandex_base_path or "/").strip() if storage_mode != "local" else "/"
     if not root_path:
@@ -108,55 +102,17 @@ async def main() -> None:
         p = (path or "").rstrip("/")
         return p.rsplit("/", 1)[-1] or "Каталог"
 
-    async def sync_dir(path: str) -> None:
-        """List one level in storage and upsert into SQLite for inline navigation."""
-        if storage is None:
-            # Storage misconfigured. Keep DB as-is.
-            return
-
-        # Ensure the directory itself exists in DB with parent pointer.
-        await db_mod.upsert_catalog_item(
-            db,
-            path=path,
-            kind="folder",
-            title=title_of(path),
-            yandex_id=path,
-            size_bytes=None,
-            parent_path=parent_of(path),
-        )
-
-        try:
-            raw_items = await storage.list_dir(path)
-        except Exception:
-            return
-
-        for it in raw_items[:200]:
-            t = it.get("type")
-            kind = "folder" if t == "dir" else "file"
-            child_path = it.get("path") or ""
-            if not child_path:
-                continue
-            title = it.get("name") or child_path
-            yid = it.get("resource_id") or child_path
-            size = it.get("size")
-            try:
-                size_i = int(size) if size is not None else None
-            except Exception:
-                size_i = None
-
-            await db_mod.upsert_catalog_item(
-                db,
-                path=child_path,
-                kind=kind,
-                title=title,
-                yandex_id=str(yid) if yid is not None else None,
-                size_bytes=size_i,
-                parent_path=path,
-            )
+    # Ensure root folder exists in DB (even before first sync).
+    await db_mod.upsert_catalog_item(
+        db,
+        path=root_path,
+        kind="folder",
+        title=title_of(root_path),
+        yandex_id=root_path,
+        parent_path=None,
+    )
 
     async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
-        await sync_dir(path)
-
         children = await db_mod.fetch_children(db, path, limit=60)
         kb: list[list[InlineKeyboardButton]] = []
         for ch in children:
@@ -199,11 +155,20 @@ async def main() -> None:
                 kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}")])
 
         text = f"{title_of(path)}"
+        last_sync = await db_mod.get_meta(db, 'catalog_last_sync_at')
+        if last_sync:
+            text += f"\n\nОбновлено: {last_sync}"
         admins = settings.admin_ids_set()
         is_admin = bool(viewer_tg_user_id and admins and viewer_tg_user_id in admins)
         # Admins can see the underlying path for debugging.
         if is_admin:
             text += f"\n\n(путь: {path})"
+
+        if not children:
+            if is_admin:
+                text += "\n\nКаталог пока пуст. Запусти /sync, чтобы worker наполнил SQLite."
+            else:
+                text += "\n\nКаталог пока пуст. Обновление выполняет админ."
 
         return text, InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -216,6 +181,7 @@ async def main() -> None:
             "Команды:\n"
             "/categories - показать каталог\n"
             "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
+            "/sync - (admin) синхронизировать каталог в фоне (worker)\n"
             "/list - показать тестовый каталог\n"
             "/download <id> - поставить задачу на отправку файла"
         )
@@ -227,6 +193,41 @@ async def main() -> None:
         # Inline navigation UI (no long callback_data, only numeric ids).
         text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
         await m.answer(text, reply_markup=markup)
+
+    @dp.message(Command("sync"))
+    async def sync_catalog(m: Message) -> None:
+        REQ_TOTAL.labels(command="sync").inc()
+        admins = settings.admin_ids_set()
+        if admins and m.from_user.id not in admins:
+            await m.answer("Недостаточно прав.")
+            return
+
+        request_id = str(uuid.uuid4())
+        # Root folder item must exist (it is created on startup), but be defensive.
+        root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
+        if root_item is None:
+            root_id = await db_mod.upsert_catalog_item(
+                db,
+                path=root_path,
+                kind="folder",
+                title=title_of(root_path),
+                yandex_id=root_path,
+                parent_path=None,
+            )
+        else:
+            root_id = int(root_item["id"])
+
+        job_id = await db_mod.insert_job(
+            db,
+            tg_chat_id=m.chat.id,
+            tg_user_id=m.from_user.id,
+            catalog_item_id=root_id,
+            request_id=request_id,
+            job_type='sync_catalog',
+        )
+        await enqueue(r, job_id)
+        JOB_ENQUEUE_TOTAL.inc()
+        await m.answer(f"Ок. Запустил синхронизацию каталога в фоне: задача #{job_id}.")
 
     @dp.callback_query(F.data.startswith("nav:"))
     async def nav_cb(q: CallbackQuery) -> None:
@@ -282,29 +283,52 @@ async def main() -> None:
             await m.answer("Недостаточно прав.")
             return
 
-        # In local mode, create a tiny demo.pdf once.
-        if getattr(settings, "storage_mode", "yandex") == "local":
-            import os as _os
-            root_dir = getattr(settings, "local_storage_root", "/data/storage")
-            _os.makedirs(root_dir, exist_ok=True)
-            demo_path = _os.path.join(root_dir, "demo.pdf")
-            if not _os.path.exists(demo_path):
-                # Minimal PDF file (enough for most viewers)
-                payload = b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 44>>stream\nBT /F1 18 Tf 20 100 Td (Adaspeas demo) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000062 00000 n \n0000000117 00000 n \n0000000241 00000 n \n0000000334 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n404\n%%EOF\n"
-                with open(demo_path, "wb") as f:
-                    f.write(payload)
+        if getattr(settings, "storage_mode", "yandex") != "local":
+            await m.answer("Команда /seed доступна только в local режиме.")
+            return
 
-        # Create a single demo item if not exists
-        await db.execute(
-            """
-            INSERT INTO catalog_items(path, kind, title, yandex_id)
-            VALUES (?, 'file', ?, ?)
-            ON CONFLICT(path) DO NOTHING
-            """,
-            ("/demo.pdf", "Demo PDF", "/demo.pdf"),
+        # In local mode, create a tiny demo.pdf once.
+        import os as _os
+        root_dir = getattr(settings, "local_storage_root", "/data/storage")
+        _os.makedirs(root_dir, exist_ok=True)
+        demo_path = _os.path.join(root_dir, "demo.pdf")
+        if not _os.path.exists(demo_path):
+            # Minimal PDF file (enough for most viewers)
+            payload = b"""%PDF-1.1
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 44>>stream
+BT /F1 18 Tf 20 100 Td (Adaspeas demo) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000010 00000 n 
+0000000062 00000 n 
+0000000117 00000 n 
+0000000241 00000 n 
+0000000334 00000 n 
+trailer<</Size 6/Root 1 0 R>>
+startxref
+404
+%%EOF
+"""
+            with open(demo_path, "wb") as f:
+                f.write(payload)
+
+        # Create a single demo item as child of catalog root.
+        await db_mod.upsert_catalog_item(
+            db,
+            path="/demo.pdf",
+            kind="file",
+            title="Demo PDF",
+            yandex_id="/demo.pdf",
+            parent_path=root_path,
         )
-        await db.commit()
         await m.answer("Ок. Добавил /demo.pdf как тестовый элемент каталога.")
+
 
     @dp.message(Command("list"))
     async def list_catalog(m: Message) -> None:
