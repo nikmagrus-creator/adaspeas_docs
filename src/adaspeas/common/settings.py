@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     local_storage_root: str = "/data/storage"
 
     # DB
-    sqlite_path: str = "/data/adaspeas.sqlite"
+    sqlite_path: str = "/data/app.db"
 
     # Queue
     redis_url: str = "redis://redis:6379/0"
