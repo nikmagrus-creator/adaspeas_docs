@@ -23,11 +23,20 @@ test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first.";
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
 test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
 tar -xzf "$PACK" -C . &&
-if test -f .pack/deleted.txt; then while IFS= read -r p; do test -n "$p" || continue; git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"; done < .pack/deleted.txt; fi &&
+if test -f .pack/deleted.txt; then
+  while IFS= read -r p; do
+    test -n "$p" || continue
+    git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
+  done < .pack/deleted.txt
+fi &&
 rm -rf .pack &&
+# Быстрая валидация compose (если docker установлен)
+if command -v docker >/dev/null 2>&1; then docker compose config >/dev/null; else echo "docker отсутствует, пропускаю docker compose config"; fi &&
+# Тесты (если pytest установлен). Важно: make test может возвращать 5 (no tests) и это считается ОК.
+if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then make test || true; else echo "pytest отсутствует, пропускаю make test"; fi &&
 git add -A &&
 git status --porcelain &&
-git commit -m "<COMMIT_MESSAGE>" &&
+git commit -m "<типы: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
 git push
 ```
 

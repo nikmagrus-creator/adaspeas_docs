@@ -7,15 +7,25 @@
 - `docs/WORKFLOW_CONTRACT_RU.md` — правила работы в чате и формат результата
 - Остальное: PRD/TECH/OPS по ссылкам из INDEX
 
-## Локальный запуск
+## Локальный запуск (Linux Mint)
 
 ```bash
-cp .env.example .env
+make env
 # Для локального end-to-end без Яндекс.Диска:
 #   - выставь STORAGE_MODE=local
 #   - вызови /seed в боте (создаст /data/storage/demo.pdf)
-docker compose up --build
+make up
 ```
+
+Важно про права на `./data` и SQLite WAL:
+- bot/worker работают не от root (UID/GID приложения).
+- SQLite включает WAL и пишет рядом с БД файлы `*.db-wal`/`*.db-shm`.
+- При первом запуске Docker может создать `./data` как `root:root`, из-за чего будет падение `attempt to write a readonly database`.
+
+Норма: в `docker-compose.yml` есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+
+Аварийно (если уже сломалось): `make fix-data-perms` и повторить `make up`.
+
 
 ## Smoke checks (локально)
 - Bot health: http://localhost:8080/health

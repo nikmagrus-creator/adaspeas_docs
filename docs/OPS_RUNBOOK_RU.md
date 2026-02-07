@@ -1,6 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-07 12:55 MSK
+Актуально на: 2026-02-07 13:55 MSK
 Этот документ отвечает на вопрос “что делать, когда оно уже работает на VPS и внезапно перестало”. Архитектурные контракты см. в `docs/TECH_SPEC_RU.md`, процесс — в `docs/WORKFLOW_CONTRACT_RU.md`.
 
 
@@ -40,20 +40,32 @@
 
 Типовой корень:
 - SQLite работает в WAL режиме и должен создавать файлы `*.db-wal` и `*.db-shm` рядом с основной БД.
-- Если директория `/data` или файл БД принадлежат root (или смонтированы read-only), контейнер под пользователем `app` (UID/GID 1000) не сможет писать.
+- Если директория `/data` или файл БД принадлежат root (или смонтированы read-only), контейнер под пользователем приложения (по умолчанию UID/GID 1000) не сможет писать.
 
-Норма (после этого патча):
-- в `docker-compose.prod.yml` и `docker-compose.yml` есть one-shot сервис `init-app-data`, который делает `mkdir -p /data && chown -R <UID>:<GID> /data` перед стартом bot/worker.
+Проверка (на VPS, даже под пользователем `deploy` это нормально, если есть доступ к Docker):
+```bash
+cd /opt/adaspeas
+docker compose -f docker-compose.prod.yml run --rm bot sh -lc 'id; echo "SQLITE_PATH=$SQLITE_PATH"; ls -la /data || true'
+```
 
-Аварийная мера (если нужно поднять сейчас, но патч ещё не задеплоен):
+Норма:
+- в `docker-compose.prod.yml` и `docker-compose.yml` есть one-shot сервис `init-app-data`, который **перед стартом bot/worker** делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+- поэтому при обычном старте (`make up` / `make up-prod`) этот инцидент не должен повторяться.
 
+Аварийная мера (если нужно поднять прямо сейчас):
+1) если в compose уже есть сервис `init-app-data`:
+```bash
+cd /opt/adaspeas
+make fix-data-perms-prod
+make up-prod
+```
+
+2) если по какой-то причине `init-app-data` отсутствует (устаревший compose), можно разово починить права через bot-контейнер от root:
 ```bash
 cd /opt/adaspeas
 docker compose -f docker-compose.prod.yml run --rm --user 0:0 bot sh -lc 'chown -R 1000:1000 /data && chmod -R u+rwX,g+rwX /data'
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
 ```
-
-
 ## 3) Local Bot API Server (local-bot-api)
 
 Зачем нужен:

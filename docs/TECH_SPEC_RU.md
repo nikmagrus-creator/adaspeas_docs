@@ -1,6 +1,6 @@
 # TECH_SPEC (RU): архитектура и контракты системы
 
-Актуально на: 2026-02-06 12:45 MSK
+Актуально на: 2026-02-07 13:55 MSK
 
 Документ описывает целевую архитектуру связки Telegram ↔ VPS ↔ Яндекс.Диск и то, что должно быть истинным (инварианты). Подробные правила процесса см. в `docs/WORKFLOW_CONTRACT_RU.md`, продуктовые цели — в `docs/PRD_RU.md`.
 
@@ -13,6 +13,16 @@
 - SQLite schema / DB: `src/adaspeas/common/db.py`
 - Config: `src/adaspeas/common/settings.py`
 - Docker compose: `docker-compose.yml`, `docker-compose.prod.yml`
+
+### Контракт /data (SQLite WAL) и права
+
+- SQLite работает в WAL режиме и при записи создаёт рядом с БД файлы `*.db-wal`/`*.db-shm`.
+- bot/worker запускаются не от root (пользователь приложения).
+- Инвариант: каталог `/data` (bind-mount или volume) **должен быть writable** для UID/GID приложения.
+
+Гарантия:
+- В обоих compose-файлах есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+- Для аварийного восстановления см. `docs/OPS_RUNBOOK_RU.md` (раздел про "readonly database") и цели `make fix-data-perms*`.
 
 Важно: карта выше отражает текущую раскладку файлов, но не означает, что реализация уже соответствует PRD. Несоответствия фиксируем в ROADMAP и ADR.
 

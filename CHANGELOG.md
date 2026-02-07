@@ -18,8 +18,12 @@
 - ci: docs policy check разрешает docs/CHATLOG_RU.md
 - fix: унифицирован fallback порт Local Bot API (8081) в bot/worker
 - ci: deploy поднимает Compose profile localbotapi по USE_LOCAL_BOT_API и валидирует TELEGRAM_API_ID/HASH
+- ci: деплой на VPS поднимает prod compose с `--remove-orphans` (чтобы не копились orphan контейнеры)
 - ci: guard: изменения кода/инфры требуют обновления CHANGELOG или CHATLOG
 - docs: синхронизированы env-имена и добавлены истории изменений в живые документы (CONTRACT/TECH/OPS/ROADMAP)
+- ops: Makefile: локальный `make up` выставляет UID/GID текущего пользователя; добавлены `make fix-data-perms*` для ручного запуска init-app-data
+- docs: README/TECH/OPS дополнены контрактом `/data` (SQLite WAL) и аварийной процедурой восстановления прав
+- docs: .env.example дополнен `APP_UID/APP_GID` для prod compose (по умолчанию 1000:1000)
 
 ### Fixed
 - ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data)
