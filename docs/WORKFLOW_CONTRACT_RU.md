@@ -1,6 +1,6 @@
 # WORKFLOW CONTRACT (RU)
 
-Актуально на: 2026-02-07 13:55 MSK
+Актуально на: 2026-02-07 14:02 MSK
 Этот документ задаёт правила работы. В спорных случаях этот контракт важнее чата, памяти и вложений.
 
 
@@ -91,23 +91,25 @@ Source of Truth для документации:
 ```bash
 cd /home/nik/projects/adaspeas &&
 
-test -d .git || { echo "No .git here (clone repo first)"; false; } &&
+test -d .git || { echo "Не репозиторий (.git не найден)"; false; } &&
 
-# ВАЖНО: в репозитории используем ТОЛЬКО ветку main (без feature-веток).
-test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Not on main. Switch to main."; false; } &&
+# 0) Работаем строго в main (никаких веток)
+test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Не на main. Переключись на main."; false; } &&
 
-# Работаем линейно: сначала подтянуть изменения без merge-коммитов.
+# 1) Линейно подтянуть изменения
 git pull --ff-only &&
 
-# После pull repo должен оставаться чистым
+# 2) Repo должен быть чистым перед применением
 test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; false; } &&
 
+# 3) Путь к паку (Linux Mint: /media/nik/0C30B3CF30B3BE50/Загрузки)
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
-
 test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
 
+# 4) Распаковать поверх репозитория
 tar -xzf "$PACK" -C . &&
 
+# 5) Применить удаления из .pack/deleted.txt (если есть)
 if test -f .pack/deleted.txt; then
   while IFS= read -r p; do
     test -n "$p" || continue
@@ -117,12 +119,61 @@ fi &&
 
 rm -rf .pack &&
 
-git add -A &&
+# 6) Быстрые проверки (опционально, не ломают цепочку на “нет docker/pytest”)
+if command -v docker >/dev/null 2>&1; then
+  docker compose config >/dev/null
+else
+  echo "docker отсутствует, пропускаю docker compose config"
+fi &&
 
-git commit -m "<типы: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
+if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then
+  make test || true
+else
+  echo "pytest отсутствует, пропускаю make test"
+fi &&
+
+# 7) Зафиксировать изменения в main (коммит по-русски)
+git add -A &&
+git status --porcelain &&
+
+git commit -m "<тип: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
 
 git push origin main
 ```
+
+
+
+## 2.2) Нулевая терпимость к веткам: чистка origin и локальных refs
+
+Если в репозитории внезапно появились ветки (например, `dependabot/*` или случайно созданная `ops/*`), их нужно удалить, чтобы не нарушать правило “только main”.
+
+Удаление удалённой ветки делается через `git push origin :<branch>` (пустой source ref удаляет ветку).
+
+Проверить, что есть лишнее:
+```bash
+git fetch origin --prune
+git branch -r
+```
+
+Автоматическая чистка: удалить ВСЁ на origin кроме `main` (и затем удалить локальные ветки кроме `main`):
+```bash
+# ВНИМАНИЕ: выполняй только если уверен(а), что все нужные коммиты уже в main.
+git fetch origin --prune &&
+
+for b in $(git for-each-ref refs/remotes/origin --format='%(refname:strip=3)' | grep -vE '^(main|HEAD)$'); do
+  echo "delete origin/$b"
+  git push origin ":$b"
+done &&
+
+git fetch origin --prune &&
+
+for b in $(git for-each-ref refs/heads --format='%(refname:strip=2)' | grep -vE '^(main)$'); do
+  echo "delete local $b"
+  git branch -D "$b"
+done
+```
+
+Почему это важно: Docker/Compose и CI у нас привязаны к линейному процессу изменений и автодеплою из `main`. Любая “временная ветка” превращается в долговременную проблему.
 
 
 ## 3) Коммиты: только по-русски
@@ -191,6 +242,7 @@ PRE-FLIGHT
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-07 14:02 MSK | ChatGPT | doc | Уточнён шаблон применения паков (docker/pytest optional) и добавлена процедура удаления лишних веток (строго только main) | |
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнён обязательный формат PRE-FLIGHT (что подключить/загрузить/нужен ли интернет) | |
 | 2026-02-05 03:00 MSK | ChatGPT | doc | Сформирован контракт процесса (пакеты, коммиты, Source of Truth) | |
 | 2026-02-06 12:45 MSK | ChatGPT | doc | Добавлены правила фиксации изменений/идей/решений и обновлён порядок работы с внешними фактами | |

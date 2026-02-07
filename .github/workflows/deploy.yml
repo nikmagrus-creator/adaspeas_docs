@@ -22,6 +22,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Branch policy (only main branch is allowed)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, sys, urllib.request
+          repo = os.environ.get('GITHUB_REPOSITORY')
+          token = os.environ.get('GITHUB_TOKEN')
+          if not repo or not token:
+            print('ERROR: missing GITHUB_REPOSITORY or GITHUB_TOKEN')
+            sys.exit(1)
+          url = f'https://api.github.com/repos/{repo}/branches?per_page=100'
+          req = urllib.request.Request(url, headers={
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'adaspeas-ci'
+          })
+          data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+          names = sorted([b.get('name','') for b in data if b.get('name')])
+          allowed = {'main'}
+          extra = [n for n in names if n not in allowed]
+          if set(names) != allowed:
+            print('ERROR: policy violation: repository must have exactly one branch: main')
+            print('Found branches:', ', '.join(names) if names else '(none)')
+            if extra:
+              print('Extra branches to delete:', ', '.join(extra))
+            print('Fix: delete all branches except main (see docs/WORKFLOW_CONTRACT_RU.md §2.2).')
+            sys.exit(1)
+          print('OK: only main branch exists.')
+          PY
+
       - name: Repo hygiene (.env must not be tracked, except .env.example)
         shell: bash
         run: |
@@ -38,6 +71,13 @@ jobs:
             exit 1
           fi
           # NOTE: .env.example is intentionally tracked; everything else matching .env / .env.* is forbidden.
+
+          forbid=\"$(git ls-files -- '.github/dependabot.yml' '.github/pull_request_template.md' '.github/PULL_REQUEST_TEMPLATE.md' || true)\"
+          if [ -n \"$forbid\" ]; then
+            echo \"ERROR: forbidden files tracked (policy: no Dependabot/PR template because they create branches):\"
+            printf '%s\n' \"$forbid\"
+            exit 1
+          fi
 
       - name: Docs policy check (timestamps + no doc sprawl)
         shell: bash

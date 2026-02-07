@@ -3,17 +3,18 @@
 Формат: Keep a Changelog. Версионирование: SemVer (0.y.z допускается для ранней стадии).
 
 ## [Unreleased]
-- docs: закреплено правило "одна ветка main" и обновлён шаблон применения pack (pull --ff-only, push origin main)
+- docs: усилена политика "только main" (шаблон применения паков с optional docker/pytest, инструкция чистки лишних веток origin/локально)
 
 ### Added
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
 - docs: ADR-003 (фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR)
 ### Changed
+- ci: отключён Dependabot (убран .github/dependabot.yml, чтобы не создавались ветки)
 - docs: закреплён обязательный формат PRE-FLIGHT (что подключить/загрузить перед задачей)
 - ops: добавлена секция метрик (/metrics) и требование hashed METRICS_PASS (caddy hash-password)
 - docs: убраны упоминания фиктивного админ‑чат/топик (заменено на админ‑чат/топик через ADR)
 - ci: deploy требует LOCAL_BOT_API_BASE при USE_LOCAL_BOT_API=1
-- ci: PR template обновлён (включён docs/DOCS_RATIONALE_RU.md)
+- ci: удалён PR template (репозиторий без PR/веток)
 - docs: переписан WORKFLOW_CONTRACT_RU.md под автономную разработку ассистентом (CHATLOG/ADR/CHANGELOG, инкрементальные пакеты, требования к командам)
 - docs: INDEX_RU.md дополнен ссылкой на CHATLOG
 - docs: ADR template уточнён (MSK/Status/Consequences)

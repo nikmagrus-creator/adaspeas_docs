@@ -2,7 +2,8 @@
 
 ## Процесс изменений (важно)
 
-- Репозиторий ведём **в одну ветку `main`** (без feature-веток).
+- Репозиторий ведём **в одну ветку `main`** (без feature-веток и PR).
+- Dependabot не используем (он создаёт ветки).
 - Любые изменения применяются через инкрементальные `.tar.gz` пакеты (см. `docs/WORKFLOW_CONTRACT_RU.md` и `docs/PACK_APPLY_TEMPLATE_RU.md`).
 - На VPS в `/opt/adaspeas` только `git pull --ff-only` и `make up-prod` (ручные правки запрещены).
 

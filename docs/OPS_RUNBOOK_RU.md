@@ -1,6 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-07 13:55 MSK
+Актуально на: 2026-02-07 14:02 MSK
 Этот документ отвечает на вопрос “что делать, когда оно уже работает на VPS и внезапно перестало”. Архитектурные контракты см. в `docs/TECH_SPEC_RU.md`, процесс — в `docs/WORKFLOW_CONTRACT_RU.md`.
 
 
@@ -39,6 +39,41 @@
 Минимальные команды:
 - `make ps-prod` / `make logs-prod` (см. Makefile)
 - или напрямую: `docker compose -f docker-compose.prod.yml ps` / `docker compose -f docker-compose.prod.yml logs -f --tail=200`
+
+
+## 2.1.1) Политика репозитория: строго одна ветка `main`
+
+У нас **не должно существовать никаких веток**, кроме `main` (ни локально, ни на `origin`), включая авто‑ветки вида `dependabot/*`.
+
+Почему: любые ветки ломают договорённость о линейном процессе “пакет → коммит в main → автодеплой”. А Dependabot по определению работает через ветки, поэтому в репозитории **не используется** (файл `.github/dependabot.yml` удалён).
+
+Если на GitHub уже накопились ветки, чистим так (выполнять на локальной машине в репозитории):
+
+```bash
+cd /home/nik/projects/adaspeas &&
+git fetch origin --prune &&
+
+# показать, что лишнее
+git branch -r &&
+
+# удалить всё на origin кроме main
+for b in $(git for-each-ref refs/remotes/origin --format='%(refname:strip=3)' | grep -vE '^(main|HEAD)$'); do
+  echo "delete origin/$b"
+  git push origin ":$b"
+done &&
+
+git fetch origin --prune &&
+
+# удалить локальные ветки кроме main
+for b in $(git for-each-ref refs/heads --format='%(refname:strip=2)' | grep -vE '^(main)$'); do
+  echo "delete local $b"
+  git branch -D "$b"
+done
+```
+
+Удаление удалённой ветки через `git push origin :<branch>` соответствует документации git-push.
+
+
 
 ## 2.2) Симптом: "sqlite3.OperationalError: attempt to write a readonly database"
 
@@ -155,6 +190,7 @@ caddy hash-password --plaintext "<пароль>"
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-07 14:02 MSK | ChatGPT | ops | Добавлена процедура чистки веток (только main) и запрет Dependabot как источника веток | |
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнены админ‑оповещения и добавлена секция метрик (/metrics) с требованием hash-password | |
 | 2026-02-07 12:55 MSK | ChatGPT | ops | Уточнено управление на VPS (prod compose) и добавлен runbook для readonly SQLite + init-app-data | |
 | 2026-02-06 00:10 MSK | ChatGPT | doc | Зафиксированы операции/инциденты и необходимость Local Bot API | |
