@@ -1,7 +1,11 @@
 __pycache__/
 *.pyc
-.env
 .data/
 data/
 *.sqlite
 .pytest_cache/
+
+# dotenv (must not be tracked)
+.env
+.env.*
+!.env.example
