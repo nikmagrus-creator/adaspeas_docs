@@ -1,6 +1,6 @@
 # WORKFLOW CONTRACT (RU)
 
-Актуально на: 2026-02-07 12:00 MSK
+Актуально на: 2026-02-07 13:55 MSK
 Этот документ задаёт правила работы. В спорных случаях этот контракт важнее чата, памяти и вложений.
 
 
@@ -13,6 +13,12 @@ Source of Truth для документации:
 - GitHub-репозиторий: https://github.com/nikmagrus-creator/adaspeas_docs
 - Вложения/архивы из чата считать потенциально устаревшими. При любом сомнении требуется актуальный архив или ссылка на текущий commit.
 - Ветка по умолчанию: `main`.
+
+Правило репозитория:
+- **Единственная ветка в `origin`: `main`.** Другие ветки **не создаём и не пушим**.
+- Работаем линейно: `git pull --ff-only`, затем коммит, затем `git push`.
+- Если случайно появилась лишняя ветка: перенести нужные коммиты в `main` (через `cherry-pick`) и удалить ветку локально/на origin.
+
 
 Каноничные пути (раз и навсегда):
 - Local (Linux Mint), репозиторий: `/home/nik/projects/adaspeas`
@@ -87,6 +93,13 @@ cd /home/nik/projects/adaspeas &&
 
 test -d .git || { echo "No .git here (clone repo first)"; false; } &&
 
+# ВАЖНО: в репозитории используем ТОЛЬКО ветку main (без feature-веток).
+test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Not on main. Switch to main."; false; } &&
+
+# Работаем линейно: сначала подтянуть изменения без merge-коммитов.
+git pull --ff-only &&
+
+# После pull repo должен оставаться чистым
 test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; false; } &&
 
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
@@ -108,7 +121,7 @@ git add -A &&
 
 git commit -m "<типы: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
 
-git push
+git push origin main
 ```
 
 

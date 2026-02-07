@@ -1,5 +1,11 @@
 # Adaspeas MVP (Bot + Worker)
 
+## Процесс изменений (важно)
+
+- Репозиторий ведём **в одну ветку `main`** (без feature-веток).
+- Любые изменения применяются через инкрементальные `.tar.gz` пакеты (см. `docs/WORKFLOW_CONTRACT_RU.md` и `docs/PACK_APPLY_TEMPLATE_RU.md`).
+- На VPS в `/opt/adaspeas` только `git pull --ff-only` и `make up-prod` (ручные правки запрещены).
+
 Минимальный репозиторий: Telegram bot + worker с автодеплоем на VPS.
 
 Документация (один вход):

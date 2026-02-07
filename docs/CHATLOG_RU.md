@@ -163,6 +163,7 @@
 Цель: закрепить “readonly database” фикс в документации и сделать восстановление максимально простым.
 
 Что сделано:
+- Процесс: закреплено правило "одна ветка main"; обновлён шаблон применения паков (pull --ff-only, push origin main).
 - Подтверждена практикой аварийная команда на VPS: разовый `chown` внутри контейнера от root действительно снимает `sqlite3.OperationalError: attempt to write a readonly database`.
 - Документация усилена: README/TECH/OPS теперь явно описывают контракт `/data` (WAL требует записи) и механизм `init-app-data` как норма.
 - Добавлены удобные цели Makefile: `make fix-data-perms` и `make fix-data-perms-prod` (запуск one-shot `init-app-data` вручную).
@@ -176,4 +177,3 @@
 
 Следующие шаги:
 - Деплоить через git (CI/CD) на VPS /opt/adaspeas и больше не лечить права руками, кроме аварийных случаев.
-

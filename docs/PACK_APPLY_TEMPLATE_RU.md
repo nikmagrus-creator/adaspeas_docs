@@ -19,6 +19,11 @@
 ```bash
 cd /home/nik/projects/adaspeas &&
 test -d .git || { echo "No .git here (clone repo first)"; false; } &&
+# ВАЖНО: в репозитории используем ТОЛЬКО ветку main (без feature-веток).
+test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Not on main. Switch to main."; false; } &&
+# Работаем линейно: сначала подтянуть изменения без merge-коммитов.
+git pull --ff-only &&
+# После pull repo должен оставаться чистым
 test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; false; } &&
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
 test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
@@ -37,7 +42,7 @@ if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&
 git add -A &&
 git status --porcelain &&
 git commit -m "<типы: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
-git push
+git push origin main
 ```
 
 Заметки:

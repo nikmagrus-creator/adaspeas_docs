@@ -29,6 +29,10 @@
 
 На VPS в `/opt/adaspeas` **в проде** нужно использовать `docker-compose.prod.yml` (или systemd unit из `deploy/bootstrap_vps.sh`).
 
+Важно по процессу:
+- Репозиторий ведём **в одну ветку `main`**. На VPS не делаем `checkout` других веток и не держим “временные” ветки на origin.
+- Обновление: `cd /opt/adaspeas && git pull --ff-only && make up-prod`.
+
 Причина: `docker compose up` без `-f` берёт по умолчанию `docker-compose.yml`, а он рассчитан на локальный запуск и bind‑mount `./data:/data`.
 Если директории `./data` ещё нет, Docker может создать её как `root:root`, и тогда бот/воркер (которые работают не от root) упрутся в ошибку SQLite "attempt to write a readonly database".
 

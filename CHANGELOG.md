@@ -3,6 +3,8 @@
 Формат: Keep a Changelog. Версионирование: SemVer (0.y.z допускается для ранней стадии).
 
 ## [Unreleased]
+- docs: закреплено правило "одна ветка main" и обновлён шаблон применения pack (pull --ff-only, push origin main)
+
 ### Added
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
 - docs: ADR-003 (фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR)
