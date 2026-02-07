@@ -64,3 +64,7 @@ class YandexDiskClient:
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes(chunk_size):
                     yield chunk
+
+    async def close(self) -> None:
+        # httpx clients are created per request in context managers.
+        return

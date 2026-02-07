@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand
+from aiogram.types import Message, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from aiogram.exceptions import TelegramUnauthorizedError
 from aiohttp import web
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
@@ -74,6 +74,139 @@ async def main() -> None:
 
     r = await get_redis(settings.redis_url)
 
+    # One storage client for whole bot lifetime (don't create sessions per click).
+    try:
+        storage = make_storage_client(settings)
+    except Exception:
+        storage = None
+
+    # Catalog navigation root.
+    storage_mode = (getattr(settings, "storage_mode", "yandex") or "yandex").strip().lower()
+    root_path = (settings.yandex_base_path or "/").strip() if storage_mode != "local" else "/"
+    if not root_path:
+        root_path = "/"
+
+    def parent_of(path: str) -> str | None:
+        p = (path or "/").rstrip("/")
+        if p == "":
+            p = "/"
+        # Do not navigate above configured root.
+        if p == root_path.rstrip("/") or p == "/":
+            return None
+        i = p.rfind("/")
+        if i <= 0:
+            return root_path
+        parent = p[:i]
+        # Clamp to root
+        if root_path != "/" and len(parent) < len(root_path.rstrip("/")):
+            return None
+        return parent
+
+    def title_of(path: str) -> str:
+        if path == root_path or path == "/":
+            return "Каталог"
+        p = (path or "").rstrip("/")
+        return p.rsplit("/", 1)[-1] or "Каталог"
+
+    async def sync_dir(path: str) -> None:
+        """List one level in storage and upsert into SQLite for inline navigation."""
+        if storage is None:
+            # Storage misconfigured. Keep DB as-is.
+            return
+
+        # Ensure the directory itself exists in DB with parent pointer.
+        await db_mod.upsert_catalog_item(
+            db,
+            path=path,
+            kind="folder",
+            title=title_of(path),
+            yandex_id=path,
+            size_bytes=None,
+            parent_path=parent_of(path),
+        )
+
+        try:
+            raw_items = await storage.list_dir(path)
+        except Exception:
+            return
+
+        for it in raw_items[:200]:
+            t = it.get("type")
+            kind = "folder" if t == "dir" else "file"
+            child_path = it.get("path") or ""
+            if not child_path:
+                continue
+            title = it.get("name") or child_path
+            yid = it.get("resource_id") or child_path
+            size = it.get("size")
+            try:
+                size_i = int(size) if size is not None else None
+            except Exception:
+                size_i = None
+
+            await db_mod.upsert_catalog_item(
+                db,
+                path=child_path,
+                kind=kind,
+                title=title,
+                yandex_id=str(yid) if yid is not None else None,
+                size_bytes=size_i,
+                parent_path=path,
+            )
+
+    async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
+        await sync_dir(path)
+
+        children = await db_mod.fetch_children(db, path, limit=60)
+        kb: list[list[InlineKeyboardButton]] = []
+        for ch in children:
+            is_folder = ch.get("kind") == "folder"
+            cb = f"nav:{ch['id']}" if is_folder else f"dl:{ch['id']}"
+            label = ("📁 " if is_folder else "📄 ") + str(ch.get("title") or "")
+            kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
+
+        # Nav controls
+        back = parent_of(path)
+        if back is not None:
+            parent_item = await db_mod.fetch_catalog_item_by_path(db, back)
+            if parent_item is None:
+                await db_mod.upsert_catalog_item(
+                    db,
+                    path=back,
+                    kind="folder",
+                    title=title_of(back),
+                    yandex_id=back,
+                    parent_path=parent_of(back),
+                )
+                parent_item = await db_mod.fetch_catalog_item_by_path(db, back)
+            if parent_item is not None:
+                kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"nav:{parent_item['id']}")])
+
+        # Root shortcut
+        if path != root_path:
+            root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
+            if root_item is None:
+                await db_mod.upsert_catalog_item(
+                    db,
+                    path=root_path,
+                    kind="folder",
+                    title=title_of(root_path),
+                    yandex_id=root_path,
+                    parent_path=None,
+                )
+                root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
+            if root_item is not None:
+                kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}")])
+
+        text = f"{title_of(path)}"
+        admins = settings.admin_ids_set()
+        is_admin = bool(viewer_tg_user_id and admins and viewer_tg_user_id in admins)
+        # Admins can see the underlying path for debugging.
+        if is_admin:
+            text += f"\n\n(путь: {path})"
+
+        return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
     @dp.message(Command("start"))
     async def start(m: Message) -> None:
         REQ_TOTAL.labels(command="start").inc()
@@ -91,74 +224,56 @@ async def main() -> None:
     @dp.message(Command("categories"))
     async def categories(m: Message) -> None:
         REQ_TOTAL.labels(command="categories").inc()
-        # Sync listing from storage into SQLite and show top level.
+        # Inline navigation UI (no long callback_data, only numeric ids).
+        text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
+        await m.answer(text, reply_markup=markup)
+
+    @dp.callback_query(F.data.startswith("nav:"))
+    async def nav_cb(q: CallbackQuery) -> None:
         try:
-            storage = make_storage_client(settings)
-        except Exception as e:
-            await m.answer(f"Хранилище не настроено: {e}")
+            item_id = int((q.data or "").split(":", 1)[1])
+        except Exception:
+            await q.answer("Некорректная команда")
             return
 
-        base = (settings.yandex_base_path or "/").strip() if getattr(settings, "storage_mode", "yandex") != "local" else "/"
-        items: list[tuple[str,str,str,str|None,int|None]] = []
-
-        if getattr(settings, "storage_mode", "yandex") == "local":
-            # local: list files under local_storage_root
-            import os as _os
-            root_dir = getattr(settings, "local_storage_root", "/data/storage")
-            try:
-                for name in sorted(_os.listdir(root_dir))[:200]:
-                    full = _os.path.join(root_dir, name)
-                    if _os.path.isdir(full):
-                        kind = "folder"
-                        size = None
-                    else:
-                        kind = "file"
-                        size = _os.path.getsize(full)
-                    path = "/" + name
-                    items.append((path, kind, name, path, size))
-            except Exception as e:
-                await m.answer(f"Не удалось прочитать локальное хранилище: {e}")
-                return
-        else:
-            # yandex: list one level under base path
-            try:
-                raw_items = await storage.list_dir_all(base)  # type: ignore[attr-defined]
-            except Exception as e:
-                await m.answer(f"Не удалось получить каталог: {e}")
-                return
-
-            for it in raw_items:
-                kind = "folder" if it.get("type") == "dir" else "file"
-                path = it.get("path") or it.get("name") or ""
-                title = it.get("name") or path
-                yid = path
-                size = it.get("size")
-                items.append((path, kind, title, yid, size))
-
-        # Upsert into DB
-        for path, kind, title, yid, size in items:
-            if not path:
-                continue
-            await db_mod.upsert_catalog_item(db, path=path, kind=kind, title=title, yandex_id=yid, size_bytes=size)
-
-        # Show first 50 entries
-        cur = await db.execute(
-            "SELECT id, kind, title, path FROM catalog_items ORDER BY kind DESC, title LIMIT 50"
-        )
-        rows = await cur.fetchall()
-        if not rows:
-            await m.answer("Каталог пуст.")
+        try:
+            item = await db_mod.fetch_catalog_item(db, item_id)
+        except Exception:
+            await q.answer("Элемент не найден")
             return
 
-        admins = settings.admin_ids_set()
-        is_admin = bool(admins and m.from_user and m.from_user.id in admins)
+        if item.get("kind") != "folder":
+            await q.answer("Это не папка")
+            return
 
-        if is_admin:
-            text = "Каталог (первые 50, с путями для админа):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]} ({r[3]})" for r in rows])
-        else:
-            # Не светим внутренние пути хранилища обычным пользователям.
-            text = "Каталог (первые 50):\n" + "\n".join([f"{r[0]} [{r[1]}]: {r[2]}" for r in rows])
-        await m.answer(text)
+        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
+        if q.message:
+            await q.message.edit_text(text, reply_markup=markup)
+        await q.answer()
+
+    @dp.callback_query(F.data.startswith("dl:"))
+    async def dl_cb(q: CallbackQuery) -> None:
+        try:
+            item_id = int((q.data or "").split(":", 1)[1])
+        except Exception:
+            await q.answer("Некорректная команда")
+            return
+
+        request_id = str(uuid.uuid4())
+        try:
+            job_id = await db_mod.insert_job(
+                db,
+                tg_chat_id=q.message.chat.id if q.message else q.from_user.id,
+                tg_user_id=q.from_user.id,
+                catalog_item_id=item_id,
+                request_id=request_id,
+            )
+        except Exception:
+            await q.answer("Не удалось создать задачу")
+            return
+        await enqueue(r, job_id)
+        JOB_ENQUEUE_TOTAL.inc()
+        await q.answer(f"Ок, задача #{job_id}")
 
     @dp.message(Command("seed"))
     async def seed(m: Message) -> None:
@@ -251,6 +366,11 @@ async def main() -> None:
             await asyncio.Event().wait()
         raise
     finally:
+        try:
+            if storage is not None:
+                await storage.close()
+        except Exception:
+            pass
         await bot.session.close()
         await db.close()
         await r.close()

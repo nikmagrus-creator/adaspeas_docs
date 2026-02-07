@@ -145,6 +145,10 @@ async def worker_loop(settings: Settings) -> None:
                 continue
             await process_one(settings, bot, storage, db, r, job_id)
     finally:
+        try:
+            await storage.close()
+        except Exception:
+            pass
         await bot.session.close()
         await db.close()
         await r.close()

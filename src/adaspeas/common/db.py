@@ -65,9 +65,17 @@ ALTER TABLE catalog_items ADD COLUMN tg_file_id TEXT;
 ALTER TABLE catalog_items ADD COLUMN tg_file_unique_id TEXT;
 """
 
-TARGET_SCHEMA_VERSION = 2
+
+# v3: support inline navigation with parent pointers (avoid long callback_data).
+MIGRATION_V3 = """
+ALTER TABLE catalog_items ADD COLUMN parent_path TEXT;
+CREATE INDEX IF NOT EXISTS idx_catalog_parent_path ON catalog_items(parent_path);
+"""
+
+TARGET_SCHEMA_VERSION = 3
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
+    3: MIGRATION_V3,
 }
 
 
@@ -200,7 +208,7 @@ async def fetch_job(db: aiosqlite.Connection, job_id: int) -> dict:
 async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
     cur = await db.execute(
         """
-        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id
+        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path
         FROM catalog_items WHERE id=?
         """,
         (item_id,),
@@ -217,6 +225,7 @@ async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
         "size_bytes": row[5],
         "tg_file_id": row[6],
         "tg_file_unique_id": row[7],
+        "parent_path": row[8],
     }
 
 
@@ -244,22 +253,72 @@ async def upsert_catalog_item(
     title: str,
     yandex_id: str | None = None,
     size_bytes: int | None = None,
+    parent_path: str | None = None,
 ) -> int:
     """Insert/update catalog item by unique path. Returns item id."""
     await db.execute(
         """
-        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, updated_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, parent_path, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(path) DO UPDATE SET
           kind=excluded.kind,
           title=excluded.title,
           yandex_id=excluded.yandex_id,
           size_bytes=excluded.size_bytes,
+          parent_path=excluded.parent_path,
           updated_at=datetime('now')
         """,
-        (path, kind, title, yandex_id, size_bytes),
+        (path, kind, title, yandex_id, size_bytes, parent_path),
     )
     await db.commit()
     cur = await db.execute("SELECT id FROM catalog_items WHERE path=?", (path,))
     row = await cur.fetchone()
     return int(row[0])
+
+
+async def fetch_catalog_item_by_path(db: aiosqlite.Connection, path: str) -> dict | None:
+    cur = await db.execute(
+        """
+        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path
+        FROM catalog_items WHERE path=?
+        """,
+        (path,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": int(row[0]),
+        "path": row[1],
+        "kind": row[2],
+        "title": row[3],
+        "yandex_id": row[4],
+        "size_bytes": row[5],
+        "tg_file_id": row[6],
+        "tg_file_unique_id": row[7],
+        "parent_path": row[8],
+    }
+
+
+async def fetch_children(
+    db: aiosqlite.Connection,
+    parent_path: str | None,
+    *,
+    limit: int = 60,
+) -> list[dict]:
+    """Fetch immediate children for a folder path."""
+    cur = await db.execute(
+        """
+        SELECT id, kind, title, size_bytes
+        FROM catalog_items
+        WHERE parent_path IS ?
+        ORDER BY kind DESC, title ASC
+        LIMIT ?
+        """,
+        (parent_path, int(limit)),
+    )
+    rows = await cur.fetchall()
+    return [
+        {"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3]}
+        for r in rows
+    ]

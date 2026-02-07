@@ -12,6 +12,9 @@ class StorageClient(Protocol):
     async def list_dir(self, path: str) -> list[dict]:
         ...
 
+    async def close(self) -> None:
+        ...
+
 
 class LocalDiskClient:
     def __init__(self, root: str):
@@ -61,6 +64,10 @@ class LocalDiskClient:
                 if not chunk:
                     break
                 yield chunk
+
+    async def close(self) -> None:
+        # No resources to close.
+        return
 
 
 def make_storage_client(settings) -> StorageClient:
