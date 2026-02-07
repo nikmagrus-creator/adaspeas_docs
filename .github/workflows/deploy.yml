@@ -59,6 +59,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Require .env.example to be tracked (template file; safe for CI)
+          if ! git ls-files --error-unmatch '.env.example' >/dev/null 2>&1; then
+            echo "ERROR: .env.example must be tracked (template for local env)."
+            exit 1
+          fi
+
           bad="$(
             git ls-files -z -- '.env' '.env.*' \
               | tr '\0' '\n' \
