@@ -5,17 +5,12 @@ data/
 *.sqlite
 .pytest_cache/
 
+# pack/apply artifacts (do not keep archives inside repo)
+.pack/
+adaspeas.zip
+adaspeas_pack_*.tar.gz
+
 # dotenv (must not be tracked)
 .env
 .env.*
 !.env.example
-
-# Архивы / пакеты
-*.zip
-*.tar
-*.tar.gz
-*.7z
-*.rar
-
-# Временная папка пакета
-.pack/
