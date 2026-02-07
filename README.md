@@ -18,6 +18,9 @@
 
 ```bash
 make env
+# Затем открой .env и задай как минимум BOT_TOKEN (и при необходимости ADMIN_USER_IDS).
+# По умолчанию данные пишутся в /data: SQLITE_PATH=/data/app.db, LOCAL_STORAGE_ROOT=/data/storage.
+
 # Для локального end-to-end без Яндекс.Диска:
 #   - выставь STORAGE_MODE=local
 #   - вызови /seed в боте (создаст /data/storage/demo.pdf)

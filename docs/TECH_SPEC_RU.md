@@ -162,6 +162,15 @@ UI строится как дерево:
 
 Каноничный список переменных см. `.env.example`.
 
+Нормальные значения по умолчанию (dev и prod одинаково):
+- `SQLITE_PATH=/data/app.db`
+- `LOCAL_STORAGE_ROOT=/data/storage`
+
+Почему так:
+- SQLite работает в WAL и создаёт рядом файлы `-wal` и `-shm`, поэтому важна запись именно в каталог с БД.
+- `/data` во всех compose монтируется как volume (prod) или bind-mount `./data` (dev), а права под него заранее приводятся one-shot сервисом `init-app-data`.
+
+
 Минимум для запуска (dev/CI):
 - `BOT_TOKEN`
 - `ADMIN_USER_IDS` (опционально, CSV)
