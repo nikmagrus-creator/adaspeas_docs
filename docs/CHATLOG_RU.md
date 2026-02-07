@@ -285,3 +285,26 @@
 - Сделать периодический sync по расписанию (interval в worker или отдельный scheduler).
 - Добавить обработку удалений (soft‑delete или реальное удаление из SQLite).
 - Для больших деревьев: пагинация (`limit/offset`) на стороне хранилища и ограничение глубины/количества узлов.
+
+
+### 2026-02-07 20:10 MSK
+Цель: закрыть “next steps” после фонового sync: расписание, удаления, пагинация UI.
+
+Что сделано:
+- SQLite schema v5:
+  - `catalog_items.seen_at` (последний раз увидели в sync),
+  - `catalog_items.is_deleted` (soft-delete),
+  - индекс `idx_catalog_deleted_parent`.
+- Worker:
+  - `sync_catalog` теперь после обхода помечает “неувиденные” элементы как `is_deleted=1` (чтобы не было “призраков”).
+  - добавлен внутренний scheduler, который периодически ставит `sync_catalog` job в очередь при `CATALOG_SYNC_INTERVAL_SEC>0`.
+  - пишется meta `catalog_last_sync_deleted`.
+- Bot:
+  - `/categories` и `nav:<id>[:<page>]` поддерживают пагинацию (`CATALOG_PAGE_SIZE`) и показывают “Удалено: ...” рядом с “Обновлено: ...”.
+
+Документы обновлены:
+- `docs/TECH_SPEC_RU.md`, `docs/ROADMAP_RU.md`, `docs/OPS_RUNBOOK_RU.md`, `docs/WORKFLOW_CONTRACT_RU.md`.
+
+Следующие шаги:
+- (по желанию) поиск по каталогу (IDEA-007).
+- (по желанию) перенос “меток времени” на MSK в UI (сейчас показываем как есть).

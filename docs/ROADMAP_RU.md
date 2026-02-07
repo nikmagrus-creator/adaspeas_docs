@@ -1,6 +1,6 @@
 # ROADMAP (RU): приоритеты разработки
 
-Актуально на: 2026-02-07 19:40 MSK
+Актуально на: 2026-02-07 20:10 MSK
 Этот документ фиксирует порядок работ. Детали требований см. `docs/PRD_RU.md`, целевую архитектуру — `docs/TECH_SPEC_RU.md`.
 
 
@@ -12,7 +12,8 @@
 - папки и файлы через inline‑кнопки
 - редактирование одного сообщения
 - кнопка “Назад”
-- (опционально) страницы/поиск
+- страницы (пагинация) *(done)*
+- (опционально) поиск
 
 2) **Local Bot API Server (режим `--local`)** *(done, infra+код)*
 - docker‑сервис `local-bot-api` (Compose profile `localbotapi`)
@@ -20,10 +21,12 @@
 - на прод‑деплое профиль поднимается автоматически, если флаг включён
 - TODO: e2e тест на файл > 50 MB
 
-3) **Фоновая синхронизация каталога** *(done, MVP: ручной /sync)*
+3) **Фоновая синхронизация каталога** *(done)*
 - UI читает только SQLite
-- синхронизация отдельной задачей в worker: вручную админом через /sync (расписание — следующий шаг)
-- метка “обновлено …” (last sync) в UI
+- синхронизация отдельной задачей в worker: вручную админом через /sync
+- (опционально) периодический scheduler внутри worker: `CATALOG_SYNC_INTERVAL_SEC>0`
+- soft-delete удалённых элементов: `is_deleted=1` (не показываем “призраков”)
+- метка “обновлено …” + “удалено …” в UI
 
 4) **Кэширование Telegram `file_id`** *(done, worker)*
 - `tg_file_id`/`tg_file_unique_id` в `catalog_items`
@@ -59,8 +62,9 @@
 | ID | Кратко | Статус | Где фиксируем | Примечание |
 |---|---|---|---|---|
 | IDEA-001 | Inline‑навигация каталога | done | Milestone 1 | UX ядро |
-| IDEA-002 | Фоновая синхронизация каталога | done (manual) | Milestone 1 | /sync + job_type=sync_catalog |
-| IDEA-003 | Поиск/пагинация в каталоге | idea | Backlog | После inline |
+| IDEA-002 | Фоновая синхронизация каталога | done | Milestone 1 | /sync + scheduler `CATALOG_SYNC_INTERVAL_SEC` |
+| IDEA-003 | Пагинация в каталоге | done | Milestone 1 | `CATALOG_PAGE_SIZE` |
+| IDEA-007 | Поиск в каталоге | idea | Backlog | После M1 |
 | IDEA-004 | Backoff/ретраи для Telegram/Yandex | idea | Backlog | Для устойчивости |
 | IDEA-005 | Авто‑включение `localbotapi` на прод‑деплое | done | deploy.yml | По флагу USE_LOCAL_BOT_API |
 | IDEA-006 | CI guard: изменения кода требуют CHANGELOG/CHATLOG | done | deploy.yml | Чтобы не “забывать” след |
@@ -69,6 +73,7 @@
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-07 20:10 MSK | ChatGPT | doc | Milestone 1: добавлены пагинация UI, soft-delete и опциональный scheduler синхронизации | |
 | 2026-02-07 19:40 MSK | ChatGPT | doc | Milestone 1: каталогу добавлен фоновой sync (job_type=sync_catalog) и UI читает только SQLite | |
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнены формулировки про админ‑оповещения (без фиктивных env) | |
 | 2026-02-07 15:30 MSK | ChatGPT | doc | Inline‑навигация каталога переведена в done (MVP), уточнено про lazy-sync папок | |

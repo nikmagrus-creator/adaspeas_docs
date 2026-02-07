@@ -8,6 +8,9 @@
 ### Added
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
 - docs: ADR-003 (фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR)
+- feat: пагинация каталога в `/categories` (настройка `CATALOG_PAGE_SIZE`)
+- feat: периодический scheduler синхронизации каталога в worker (настройка `CATALOG_SYNC_INTERVAL_SEC`)
+- feat: soft-delete каталога в SQLite (schema v5: `seen_at`, `is_deleted`, meta `catalog_last_sync_deleted`)
 ### Changed
 - ci: отключён Dependabot (убран .github/dependabot.yml, чтобы не создавались ветки)
 - docs: закреплён обязательный формат PRE-FLIGHT (что подключить/загрузить перед задачей)

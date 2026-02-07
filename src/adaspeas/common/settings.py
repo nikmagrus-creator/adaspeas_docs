@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     # DB
     sqlite_path: str = "/data/app.db"
 
+    # Catalog UI / sync
+    # Page size for inline catalog navigation.
+    catalog_page_size: int = 25
+    # Periodic background sync in worker (0 disables; recommended in prod: 3600).
+    catalog_sync_interval_sec: int = 0
+    # Safety cap for nodes visited per sync (prevents endless trees / huge repos).
+    catalog_sync_max_nodes: int = 5000
+
     # Queue
     redis_url: str = "redis://redis:6379/0"
 

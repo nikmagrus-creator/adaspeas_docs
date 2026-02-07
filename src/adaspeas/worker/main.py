@@ -4,6 +4,7 @@ import asyncio
 from collections import deque
 from datetime import datetime, timezone
 import tempfile
+import uuid
 
 from aiohttp import web
 from aiogram import Bot
@@ -46,7 +47,7 @@ async def make_app() -> web.Application:
     return app
 
 
-async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path: str, *, max_nodes: int = 5000) -> int:
+async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path: str, *, max_nodes: int = 5000) -> tuple[int, int]:
     # Walk storage tree and upsert items into SQLite.
     # Designed for background execution in worker; bot UI reads only SQLite.
     root = (root_path or '/').rstrip('/') or '/'
@@ -56,6 +57,8 @@ async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path
             return p.startswith('/')
         rp = root.rstrip('/')
         return p == rp or p.startswith(rp + '/')
+
+    sync_started = await db_mod.db_now(db)
 
     queue = deque([root])
     seen: set[str] = set()
@@ -111,7 +114,66 @@ async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path
             if upserted >= max_nodes:
                 break
 
-    return upserted
+    deleted = 0
+    if sync_started:
+        deleted = await db_mod.mark_deleted_not_seen(db, root, sync_started)
+
+    return upserted, deleted
+
+
+async def periodic_sync_scheduler(settings: Settings, db, r) -> None:
+    """Periodically enqueue catalog sync jobs.
+
+    Runs entirely in the worker container; it does not talk to Telegram.
+    """
+    interval = int(getattr(settings, 'catalog_sync_interval_sec', 0) or 0)
+    if interval <= 0:
+        return
+
+    storage_mode = (getattr(settings, 'storage_mode', 'yandex') or 'yandex').strip().lower()
+    root_path = (getattr(settings, 'yandex_base_path', '/') or '/').strip() if storage_mode != 'local' else '/'
+    root_path = root_path or '/'
+
+    # Small startup delay to let redis/db settle.
+    await asyncio.sleep(5)
+
+    while True:
+        try:
+            if await db_mod.has_active_sync_job(db):
+                await asyncio.sleep(interval)
+                continue
+
+            root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
+            if root_item is None:
+                root_id = await db_mod.upsert_catalog_item(
+                    db,
+                    path=root_path,
+                    kind='folder',
+                    title='Каталог',
+                    yandex_id=root_path,
+                    parent_path=None,
+                )
+            else:
+                root_id = int(root_item['id'])
+
+            job_id = await db_mod.insert_job(
+                db,
+                tg_chat_id=0,
+                tg_user_id=0,
+                catalog_item_id=root_id,
+                request_id=str(uuid.uuid4()),
+                job_type='sync_catalog',
+            )
+            await enqueue(r, job_id)
+            JOB_ENQUEUE_TOTAL.inc()
+            log.info('sync_scheduled', job_id=job_id, interval_s=interval)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning('sync_scheduler_error', err=str(e))
+
+        await asyncio.sleep(interval)
 
 
 async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, r, job_id: int) -> None:
@@ -135,21 +197,29 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
             except Exception:
                 root_path = str(settings.yandex_base_path or '/')
 
-            n = await sync_catalog(settings, storage, db, root_path)
+            max_nodes = int(getattr(settings, 'catalog_sync_max_nodes', 5000) or 5000)
+            n, deleted = await sync_catalog(settings, storage, db, root_path, max_nodes=max_nodes)
             ts = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
             await db_mod.set_meta(db, 'catalog_last_sync_at', ts)
+            await db_mod.set_meta(db, 'catalog_last_sync_deleted', str(deleted))
             # Optional: notify the requester (admin). Never fail the job because of Telegram send.
-            try:
-                await bot.send_message(
-                    chat_id=job["tg_chat_id"],
-                    text=f"Синхронизация каталога завершена. Элементов обработано: {n}.\nОбновлено: {ts}",
-                )
-            except Exception:
-                pass
+            if int(job.get("tg_chat_id") or 0) > 0:
+                try:
+                    await bot.send_message(
+                        chat_id=job["tg_chat_id"],
+                        text=(
+                            f"Синхронизация каталога завершена.\n"
+                            f"Обработано: {n}.\n"
+                            f"Удалено (soft-delete): {deleted}.\n"
+                            f"Обновлено: {ts}"
+                        ),
+                    )
+                except Exception:
+                    pass
 
             await db_mod.set_job_state(db, job_id, "succeeded")
             JOBS_SUCCEEDED.inc()
-            log.info('job_succeeded', job_id=job_id, mode='sync_catalog', items=n)
+            log.info('job_succeeded', job_id=job_id, mode='sync_catalog', items=n, deleted=deleted)
             return
 
         # Default: download job
@@ -237,6 +307,10 @@ async def worker_loop(settings: Settings) -> None:
     await db_mod.ensure_schema(db)
     r = await get_redis(settings.redis_url)
 
+    scheduler_task: asyncio.Task | None = None
+    if int(getattr(settings, 'catalog_sync_interval_sec', 0) or 0) > 0:
+        scheduler_task = asyncio.create_task(periodic_sync_scheduler(settings, db, r), name='periodic_sync')
+
     try:
         while True:
             job_id = await dequeue(r, timeout_s=5)
@@ -245,6 +319,12 @@ async def worker_loop(settings: Settings) -> None:
                 continue
             await process_one(settings, bot, storage, db, r, job_id)
     finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except Exception:
+                pass
         try:
             await storage.close()
         except Exception:

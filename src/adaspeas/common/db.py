@@ -85,11 +85,20 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE INDEX IF NOT EXISTS idx_jobs_type_state ON jobs(job_type, state);
 """
 
-TARGET_SCHEMA_VERSION = 4
+
+# v5: soft-delete + "last seen" timestamp for catalog sync
+MIGRATION_V5 = """
+ALTER TABLE catalog_items ADD COLUMN seen_at TEXT;
+ALTER TABLE catalog_items ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_catalog_deleted_parent ON catalog_items(is_deleted, parent_path);
+"""
+
+TARGET_SCHEMA_VERSION = 5
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
     4: MIGRATION_V4,
+    5: MIGRATION_V5,
 }
 
 
@@ -224,7 +233,7 @@ async def fetch_job(db: aiosqlite.Connection, job_id: int) -> dict:
 async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
     cur = await db.execute(
         """
-        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path
+        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path, seen_at, is_deleted
         FROM catalog_items WHERE id=?
         """,
         (item_id,),
@@ -242,6 +251,8 @@ async def fetch_catalog_item(db: aiosqlite.Connection, item_id: int) -> dict:
         "tg_file_id": row[6],
         "tg_file_unique_id": row[7],
         "parent_path": row[8],
+        "seen_at": row[9],
+        "is_deleted": int(row[10] or 0),
     }
 
 
@@ -274,15 +285,17 @@ async def upsert_catalog_item(
     """Insert/update catalog item by unique path. Returns item id."""
     await db.execute(
         """
-        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, parent_path, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO catalog_items(path, kind, title, yandex_id, size_bytes, parent_path, updated_at, seen_at, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 0)
         ON CONFLICT(path) DO UPDATE SET
           kind=excluded.kind,
           title=excluded.title,
           yandex_id=excluded.yandex_id,
           size_bytes=excluded.size_bytes,
           parent_path=excluded.parent_path,
-          updated_at=datetime('now')
+          updated_at=datetime('now'),
+          seen_at=datetime('now'),
+          is_deleted=0
         """,
         (path, kind, title, yandex_id, size_bytes, parent_path),
     )
@@ -295,7 +308,7 @@ async def upsert_catalog_item(
 async def fetch_catalog_item_by_path(db: aiosqlite.Connection, path: str) -> dict | None:
     cur = await db.execute(
         """
-        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path
+        SELECT id, path, kind, title, yandex_id, size_bytes, tg_file_id, tg_file_unique_id, parent_path, seen_at, is_deleted
         FROM catalog_items WHERE path=?
         """,
         (path,),
@@ -313,6 +326,8 @@ async def fetch_catalog_item_by_path(db: aiosqlite.Connection, path: str) -> dic
         "tg_file_id": row[6],
         "tg_file_unique_id": row[7],
         "parent_path": row[8],
+        "seen_at": row[9],
+        "is_deleted": int(row[10] or 0),
     }
 
 
@@ -321,6 +336,7 @@ async def fetch_children(
     parent_path: str | None,
     *,
     limit: int = 60,
+    offset: int = 0,
 ) -> list[dict]:
     """Fetch immediate children for a folder path."""
     cur = await db.execute(
@@ -328,16 +344,81 @@ async def fetch_children(
         SELECT id, kind, title, size_bytes
         FROM catalog_items
         WHERE parent_path IS ?
+          AND is_deleted=0
         ORDER BY kind DESC, title ASC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (parent_path, int(limit)),
+        (parent_path, int(limit), int(offset)),
     )
     rows = await cur.fetchall()
     return [
         {"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3]}
         for r in rows
     ]
+
+
+async def count_children(db: aiosqlite.Connection, parent_path: str | None) -> int:
+    cur = await db.execute(
+        """
+        SELECT COUNT(*)
+        FROM catalog_items
+        WHERE parent_path IS ?
+          AND is_deleted=0
+        """,
+        (parent_path,),
+    )
+    row = await cur.fetchone()
+    return int(row[0] or 0)
+
+
+async def db_now(db: aiosqlite.Connection) -> str:
+    """Return SQLite's datetime('now') string for lexicographically comparable timestamps."""
+    cur = await db.execute("SELECT datetime('now')")
+    row = await cur.fetchone()
+    return str(row[0]) if row and row[0] else ""
+
+
+async def mark_deleted_not_seen(db: aiosqlite.Connection, root_path: str, seen_threshold: str) -> int:
+    """Mark as deleted everything under root that wasn't seen since seen_threshold."""
+    root = (root_path or "/").rstrip("/") or "/"
+    if root == "/":
+        like = "/%"
+        args = (seen_threshold, like, root)
+        q = """
+        UPDATE catalog_items
+        SET is_deleted=1, updated_at=datetime('now')
+        WHERE (seen_at IS NULL OR seen_at < ?)
+          AND path LIKE ?
+          AND path != ?
+          AND is_deleted=0
+        """
+    else:
+        like = root.rstrip("/") + "/%"
+        args = (seen_threshold, root, like, root)
+        q = """
+        UPDATE catalog_items
+        SET is_deleted=1, updated_at=datetime('now')
+        WHERE (seen_at IS NULL OR seen_at < ?)
+          AND (path = ? OR path LIKE ?)
+          AND path != ?
+          AND is_deleted=0
+        """
+    cur = await db.execute(q, args)
+    await db.commit()
+    return int(cur.rowcount or 0)
+
+
+async def has_active_sync_job(db: aiosqlite.Connection) -> bool:
+    cur = await db.execute(
+        """
+        SELECT 1 FROM jobs
+        WHERE job_type='sync_catalog'
+          AND state IN ('queued','running')
+        LIMIT 1
+        """,
+    )
+    row = await cur.fetchone()
+    return bool(row)
 
 
 async def get_meta(db: aiosqlite.Connection, key: str) -> str | None:

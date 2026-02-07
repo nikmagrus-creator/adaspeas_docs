@@ -1,6 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-07 15:35 MSK
+Актуально на: 2026-02-07 20:10 MSK
 
 
 ## 1) Компоненты в проде
@@ -38,7 +38,6 @@
 Минимальные команды:
 - `make ps-prod` / `make logs-prod` (см. Makefile)
 - или напрямую: `docker compose -f docker-compose.prod.yml ps` / `docker compose -f docker-compose.prod.yml logs -f --tail=200`
-
 
 ## 2.1.1) Политика репозитория: строго одна ветка `main`
 
@@ -102,6 +101,16 @@ git reset --hard origin/main
 ```
 
 Примечание: если у тебя были важные локальные изменения, сначала сделай `git stash`.
+
+## 2.1.3) Каталог: включение периодической синхронизации
+
+По умолчанию автоматический sync выключен. Чтобы включить (prod):
+- в env (`.env`/`docker-compose.prod.yml`): `CATALOG_SYNC_INTERVAL_SEC=3600` (пример)
+- (опционально) `CATALOG_SYNC_MAX_NODES=5000` и `CATALOG_PAGE_SIZE=25`
+- перезапустить worker (`docker compose -f docker-compose.prod.yml up -d --force-recreate worker`)
+
+Проверка:
+- в Telegram `/categories` должны появиться метки `Обновлено:` и `Удалено:` после первого sync.
 
 ## 2.2) Симптом: "sqlite3.OperationalError: attempt to write a readonly database"
 
@@ -218,6 +227,7 @@ caddy hash-password --plaintext "<пароль>"
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-07 20:10 MSK | ChatGPT | ops | Добавлены шаги включения периодической синхронизации каталога (env + перезапуск worker) | |
 | 2026-02-07 14:02 MSK | ChatGPT | ops | Добавлена процедура чистки веток (только main) и запрет Dependabot как источника веток | |
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнены админ‑оповещения и добавлена секция метрик (/metrics) с требованием hash-password | |
 | 2026-02-07 12:55 MSK | ChatGPT | ops | Уточнено управление на VPS (prod compose) и добавлен runbook для readonly SQLite + init-app-data | |

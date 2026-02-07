@@ -112,14 +112,45 @@ async def main() -> None:
         parent_path=None,
     )
 
-    async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
-        children = await db_mod.fetch_children(db, path, limit=60)
+    async def render_dir(
+        path: str,
+        *,
+        page: int = 0,
+        viewer_tg_user_id: int | None = None,
+    ) -> tuple[str, InlineKeyboardMarkup]:
+        page_size = int(getattr(settings, "catalog_page_size", 25) or 25)
+        # Telegram inline keyboards are limited; keep it sane.
+        if page_size < 5:
+            page_size = 5
+        if page_size > 50:
+            page_size = 50
+
+        total = await db_mod.count_children(db, path)
+        max_page = 0 if total <= 0 else max(0, (total - 1) // page_size)
+        if page < 0:
+            page = 0
+        if page > max_page:
+            page = max_page
+
+        children = await db_mod.fetch_children(db, path, limit=page_size, offset=page * page_size)
         kb: list[list[InlineKeyboardButton]] = []
         for ch in children:
             is_folder = ch.get("kind") == "folder"
-            cb = f"nav:{ch['id']}" if is_folder else f"dl:{ch['id']}"
+            cb = f"nav:{ch['id']}:0" if is_folder else f"dl:{ch['id']}"
             label = ("📁 " if is_folder else "📄 ") + str(ch.get("title") or "")
             kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
+
+        # Paging controls for the current directory
+        self_item = await db_mod.fetch_catalog_item_by_path(db, path)
+        self_id = int(self_item["id"]) if self_item else None
+        if self_id is not None and max_page > 0:
+            row: list[InlineKeyboardButton] = []
+            if page > 0:
+                row.append(InlineKeyboardButton(text="◀️", callback_data=f"nav:{self_id}:{page - 1}"))
+            if page < max_page:
+                row.append(InlineKeyboardButton(text="▶️", callback_data=f"nav:{self_id}:{page + 1}"))
+            if row:
+                kb.append(row)
 
         # Nav controls
         back = parent_of(path)
@@ -158,6 +189,12 @@ async def main() -> None:
         last_sync = await db_mod.get_meta(db, 'catalog_last_sync_at')
         if last_sync:
             text += f"\n\nОбновлено: {last_sync}"
+            deleted = await db_mod.get_meta(db, 'catalog_last_sync_deleted')
+            if deleted is not None:
+                text += f"\nУдалено: {deleted}"
+
+        if max_page > 0:
+            text += f"\nСтраница: {page + 1}/{max_page + 1} (элементов: {total})"
         admins = settings.admin_ids_set()
         is_admin = bool(viewer_tg_user_id and admins and viewer_tg_user_id in admins)
         # Admins can see the underlying path for debugging.
@@ -231,11 +268,21 @@ async def main() -> None:
 
     @dp.callback_query(F.data.startswith("nav:"))
     async def nav_cb(q: CallbackQuery) -> None:
+        raw = (q.data or "")
+        parts = raw.split(":")
+        # nav:<id> or nav:<id>:<page>
         try:
-            item_id = int((q.data or "").split(":", 1)[1])
+            item_id = int(parts[1])
         except Exception:
             await q.answer("Некорректная команда")
             return
+
+        page = 0
+        if len(parts) >= 3:
+            try:
+                page = int(parts[2])
+            except Exception:
+                page = 0
 
         try:
             item = await db_mod.fetch_catalog_item(db, item_id)
@@ -247,7 +294,11 @@ async def main() -> None:
             await q.answer("Это не папка")
             return
 
-        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
+        text, markup = await render_dir(
+            str(item.get("path") or root_path),
+            page=page,
+            viewer_tg_user_id=q.from_user.id,
+        )
         if q.message:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()
