@@ -54,36 +54,35 @@ jobs:
             sys.exit(1)
           print('OK: only main branch exists.')
           PY
-
       - name: Repo hygiene (.env must not be tracked, except .env.example)
         shell: bash
         run: |
           set -euo pipefail
 
-          # Require .env.example to be tracked (template file; safe for CI)
+          echo "Tracked env-like files:"
+          git ls-files -- '.env' '.env.*' || true
+
+          # 1) .env.example must be tracked (template file; used by make env)
           if ! git ls-files --error-unmatch '.env.example' >/dev/null 2>&1; then
-            echo "ERROR: .env.example must be tracked (template for local env)."
-            exit 1
+            echo "::error::.env.example must be tracked (required template)."
+            exit 2
           fi
 
-          bad="$(
-            git ls-files -z -- '.env' '.env.*' \
-              | tr '\0' '\n' \
-              | grep -vE '(^|/)\.env\.example$' \
-              || true
-          )"
+          # 2) No other tracked dotenv files
+          tracked_env="$(git ls-files -- '.env' '.env.*' || true)"
+          bad="$(printf '%s\n' "$tracked_env" | grep -vE '(^|/)\.env\.example$' || true)"
           if [ -n "$bad" ]; then
-            echo "ERROR: tracked .env file(s) found. Only .env.example is allowed."
+            echo "::error::Forbidden tracked dotenv files (only .env.example allowed):"
             printf '%s\n' "$bad"
-            exit 1
+            exit 2
           fi
-          # NOTE: .env.example is intentionally tracked; everything else matching .env / .env.* is forbidden.
 
-          forbid=\"$(git ls-files -- '.github/dependabot.yml' '.github/pull_request_template.md' '.github/PULL_REQUEST_TEMPLATE.md' || true)\"
-          if [ -n \"$forbid\" ]; then
-            echo \"ERROR: forbidden files tracked (policy: no Dependabot/PR template because they create branches):\"
-            printf '%s\n' \"$forbid\"
-            exit 1
+          # 3) Ensure no dependabot / PR templates (they create branches)
+          forbid="$(git ls-files -- '.github/dependabot.yml' '.github/pull_request_template.md' '.github/PULL_REQUEST_TEMPLATE.md' || true)"
+          if [ -n "$forbid" ]; then
+            echo "::error::Forbidden files tracked (policy: no Dependabot/PR template because they create branches):"
+            printf '%s\n' "$forbid"
+            exit 2
           fi
 
       - name: Docs policy check (timestamps + no doc sprawl)

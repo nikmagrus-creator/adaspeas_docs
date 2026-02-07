@@ -1,6 +1,6 @@
 # WORKFLOW CONTRACT (RU)
 
-Актуально на: 2026-02-07 14:02 MSK
+Актуально на: 2026-02-07 16:25 MSK
 Этот документ задаёт правила работы. В спорных случаях этот контракт важнее чата, памяти и вложений.
 
 
@@ -17,7 +17,9 @@ Source of Truth для документации:
 Правило репозитория:
 - **Единственная ветка в `origin`: `main`.** Другие ветки **не создаём и не пушим**.
 - Работаем линейно: `git pull --ff-only`, затем коммит, затем `git push`.
-- Если случайно появилась лишняя ветка: перенести нужные коммиты в `main` (через `cherry-pick`) и удалить ветку локально/на origin.
+- Если случайно появилась лишняя ветка: **не делаем merge/cherry-pick/rebase.**
+  - Если ветка не нужна: удалить её локально/на `origin`.
+  - Если изменения нужны: собрать их заново в pack и применить в `main` (см. `docs/PACK_APPLY_TEMPLATE_RU.md`).
 
 
 Каноничные пути (раз и навсегда):
@@ -86,62 +88,15 @@ Source of Truth для документации:
 
 ## 2.1) Каноничный шаблон применения пакета
 
-Ниже шаблон команд. Он короткий, безопасный, не использует `set -e`/`exit`, поддерживает `.pack/deleted.txt`.
+Единственный актуальный шаблон команд находится в `docs/PACK_APPLY_TEMPLATE_RU.md`.
 
-```bash
-cd /home/nik/projects/adaspeas &&
+Правило простое: **любые замечания и улучшения сначала правим в шаблоне**, а в этом контракте держим только политику и ссылки.
 
-test -d .git || { echo "Не репозиторий (.git не найден)"; false; } &&
-
-# 0) Работаем строго в main (никаких веток)
-test "$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "Не на main. Переключись на main."; false; } &&
-
-# 1) Линейно подтянуть изменения
-git pull --ff-only &&
-
-# 2) Repo должен быть чистым перед применением
-test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; false; } &&
-
-# 3) Путь к паку (Linux Mint: /media/nik/0C30B3CF30B3BE50/Загрузки)
-PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
-test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
-
-# 4) Распаковать поверх репозитория
-tar -xzf "$PACK" -C . &&
-
-# 5) Применить удаления из .pack/deleted.txt (если есть)
-if test -f .pack/deleted.txt; then
-  while IFS= read -r p; do
-    test -n "$p" || continue
-    git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
-  done < .pack/deleted.txt
-fi &&
-
-rm -rf .pack &&
-
-# 6) Быстрые проверки (опционально, не ломают цепочку на “нет docker/pytest”)
-if command -v docker >/dev/null 2>&1; then
-  docker compose config >/dev/null
-else
-  echo "docker отсутствует, пропускаю docker compose config"
-fi &&
-
-if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then
-  make test || true
-else
-  echo "pytest отсутствует, пропускаю make test"
-fi &&
-
-# 7) Зафиксировать изменения в main (коммит по-русски)
-git add -A &&
-git status --porcelain &&
-
-git commit -m "<тип: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
-
-git push origin main
-```
-
-
+Короткая логика применения pack:
+- работаем только в `main` и подтягиваем `origin/main` линейно (`git pull --ff-only`);
+- снимаем/абортим любые незавершённые операции (merge/cherry-pick/rebase) и приводим дерево в чистое состояние;
+- распаковываем pack, применяем `.pack/deleted.txt`, удаляем `.pack`;
+- `git add -A`, коммит, push в `main`.
 
 ## 2.2) Нулевая терпимость к веткам: чистка origin и локальных refs
 
@@ -242,6 +197,7 @@ PRE-FLIGHT
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-07 16:25 MSK | ChatGPT | docs | Убрана рекомендация cherry-pick, шаблон применения pack вынесен в отдельный файл как единственный источник истины | |
 | 2026-02-07 14:02 MSK | ChatGPT | doc | Уточнён шаблон применения паков (docker/pytest optional) и добавлена процедура удаления лишних веток (строго только main) | |
 | 2026-02-07 12:00 MSK | ChatGPT | doc | Уточнён обязательный формат PRE-FLIGHT (что подключить/загрузить/нужен ли интернет) | |
 | 2026-02-05 03:00 MSK | ChatGPT | doc | Сформирован контракт процесса (пакеты, коммиты, Source of Truth) | |

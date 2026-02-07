@@ -2,71 +2,97 @@
 
 Этот документ фиксирует **каноничный** способ применения изменений, присланных как инкрементальный `tar.gz` пакет.
 
-Требования:
-- Пакет содержит **только** изменённые файлы с путями **от корня репозитория**.
-- Если есть удаления, пакет содержит файл `.pack/deleted.txt` (по одному пути на строку).
-- Команды должны быть:
+Требования к pack:
+- содержит **только** изменённые файлы с путями **от корня репозитория**;
+- удаления описываются в `.pack/deleted.txt` (по одному пути на строку);
+- **не содержит** `.git/`;
+- после применения `.pack/` удаляется.
 
-Дополнительно:
-- Инкрементальный pack **не должен** содержать каталог `.git/` (это служебное состояние твоей машины).
-- Если случайно прислали полный zip репозитория, **игнорируй** `.git/` и сначала приведи рабочее дерево в чистое состояние (см. `docs/OPS_RUNBOOK_RU.md` раздел про отмену merge/cherry-pick).
-
+Правила репозитория:
+- работаем **только** в `main`;
+- **не используем** `merge/cherry-pick/rebase`;
+- изменения из pack всегда фиксируем коммитом в `main`.
 
 Контекст путей (зафиксировано для повторяемости):
 - Local (Linux Mint): репозиторий `/home/nik/projects/adaspeas`
 - Папка скачивания паков: `/media/nik/0C30B3CF30B3BE50/Загрузки`
-- VPS: директория проекта `/opt/adaspeas` (на VPS пакеты **не распаковываем**, там только `git pull --ff-only` из `main` и `make up-prod`)
-  - в одной `&&`-цепочке (чтобы прерываться на ошибке без `set -e`),
-  - без `exit` и без `set -e`,
-  - с проверкой “repo чистый” до применения,
-  - с удалением `.pack` после обработки.
+- VPS: директория проекта `/opt/adaspeas`
+  - на VPS pack **не распаковываем**; там только `git pull --ff-only` из `main` и `make up-prod`
 
 ## Каноничный шаблон команд
 
-1) Скачай пакет в папку скачивания (обычно: `/media/nik/0C30B3CF30B3BE50/Загрузки`).
-2) Выполни (замени `PACK=...` на имя файла пакета):
+1) Скачай pack в `/media/nik/0C30B3CF30B3BE50/Загрузки`.
+2) Выполни (замени `PACK=...` на имя файла):
 
 ```bash
 cd /home/nik/projects/adaspeas &&
-test -d .git || { echo "Не репозиторий (.git не найден). Склонируй adaspeas_docs."; false; } &&
-# В репозитории разрешена только ветка main.
+
+test -d .git || { echo "Не репозиторий (.git не найден)."; false; } &&
+
 git checkout main &&
-# Работаем линейно: подтянуть изменения без merge-коммитов.
+
+git fetch origin --prune &&
+
+# Снять любые незавершённые операции (частая причина "needs merge")
+git cherry-pick --abort >/dev/null 2>&1 || true &&
+git merge --abort >/dev/null 2>&1 || true &&
+git rebase --abort >/dev/null 2>&1 || true &&
+
+# Запрещаем локальные коммиты поверх origin/main (у нас одна ветка и линейная история)
+test "$(git rev-list --count origin/main..HEAD)" -eq 0 || { echo "Есть локальные коммиты не в origin/main. Сначала приведи репо к origin/main (см. docs/OPS_RUNBOOK_RU.md)."; false; } &&
+
+# Жёстко синхронизировать рабочее дерево с origin/main
+git reset --hard origin/main &&
+
 git pull --ff-only &&
-# Нельзя продолжать, если есть незавершённый merge/cherry-pick (иначе в файлах будут маркеры конфликтов).
-test ! -f .git/CHERRY_PICK_HEAD || { echo "Cherry-pick in progress. Выполни: git cherry-pick --abort"; false; } &&
-test ! -f .git/MERGE_HEAD || { echo "Merge in progress. Выполни: git merge --abort"; false; } &&
-# После pull repo должен оставаться чистым
-test -z "$(git status --porcelain)" || { echo "Repo dirty. Resolve/commit/stash first."; git status --porcelain; false; } &&
+
+# Repo должен быть чистым перед применением pack
+test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; git status --porcelain; false; } &&
+
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
 test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
+
+# Распаковать pack поверх репозитория
 tar -xzf "$PACK" -C . &&
-# применить удаления (контракт)
+
+# Применить удаления из .pack/deleted.txt (если есть)
 if test -f .pack/deleted.txt; then
   while IFS= read -r p; do
     test -n "$p" || continue
     git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
   done < .pack/deleted.txt
 fi &&
+
 rm -rf .pack &&
+
 # Быстрая валидация compose (если docker установлен)
 if command -v docker >/dev/null 2>&1; then docker compose config >/dev/null; else echo "docker отсутствует, пропускаю docker compose config"; fi &&
+
 # Тесты (если pytest установлен)
 if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then make test || true; else echo "pytest отсутствует, пропускаю make test"; fi &&
+
 git add -A &&
-git status --porcelain &&
-git commit -m "<типы: docs|feat|fix|refactor|ops|chore|test>: <сообщение по-русски>" &&
-git push origin main
+
+# Если pack не дал изменений, не коммитим
+if test -z "$(git status --porcelain)"; then
+  echo "No changes after pack (already applied or empty).";
+  true;
+else
+  git status --porcelain &&
+  git commit -m "<type>: <сообщение по-русски>" &&
+  git push origin main;
+fi
 ```
 
 Заметки:
-- `git status --porcelain` после `git add -A` оставлен намеренно: удобно увидеть, что реально изменилось, но он не ломает цепочку.
-- `git rm --ignore-unmatch` безопасен для путей, которые уже отсутствуют, и корректно фиксирует удаления в git.
+- Намеренно используем одну `&&`-цепочку: ошибка в середине останавливает процесс без `set -e`.
+- Пакеты распаковываются **только локально**. На VPS изменения приезжают через `git pull` из `main`.
+- Если тебе прислали "полный zip репозитория" и внутри есть `.git/`, **не распаковывай его поверх своего репозитория**. Нужен именно инкрементальный pack.
 
-Актуально на: 2026-02-07 15:35 MSK
+Актуально на: 2026-02-07 16:10 MSK
 
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
 | 2026-02-07 14:02 MSK | ChatGPT | doc | Добавлен блок с фиксированными путями (Local/Downloads/VPS) и уточнение что пакеты распаковываются только локально, а не на VPS | |
-
+| 2026-02-07 16:10 MSK | ChatGPT | doc | Добавлен безопасный пролог (abort/reset к origin/main), убран мусор в требованиях, добавлена защита от пустого коммита | |
