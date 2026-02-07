@@ -60,6 +60,7 @@ async def main() -> None:
     try:
         await bot.set_my_commands([
             BotCommand(command='start', description='Показать справку'),
+            BotCommand(command='id', description='Показать свой Telegram ID'),
             BotCommand(command='categories', description='Каталог'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
             BotCommand(command='download', description='Скачать файл по id из /list'),
@@ -231,12 +232,25 @@ async def main() -> None:
         text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
         await m.answer(text, reply_markup=markup)
 
-    @dp.message(Command("sync"))
+    
+
+@dp.message(Command("id"))
+async def show_id(m: Message) -> None:
+    REQ_TOTAL.labels(command="id").inc()
+    if not m.from_user:
+        await m.answer("Не удалось определить ваш ID.")
+        return
+    await m.answer(f"Ваш Telegram ID: {m.from_user.id}")
+@dp.message(Command("sync"))
     async def sync_catalog(m: Message) -> None:
         REQ_TOTAL.labels(command="sync").inc()
         admins = settings.admin_ids_set()
-        if admins and m.from_user.id not in admins:
-            await m.answer("Недостаточно прав.")
+        uid = m.from_user.id if m.from_user else 0
+        if admins and uid not in admins:
+            await m.answer(
+                f"Недостаточно прав. Ваш ID: {uid}. "
+                "Добавьте его в переменную ADMIN_USER_IDS (через запятую) в .env и перезапустите сервисы."
+            )
             return
 
         request_id = str(uuid.uuid4())
@@ -330,8 +344,13 @@ async def main() -> None:
     @dp.message(Command("seed"))
     async def seed(m: Message) -> None:
         REQ_TOTAL.labels(command="seed").inc()
-        if settings.admin_ids_set() and m.from_user.id not in settings.admin_ids_set():
-            await m.answer("Недостаточно прав.")
+        admins = settings.admin_ids_set()
+        uid = m.from_user.id if m.from_user else 0
+        if admins and uid not in admins:
+            await m.answer(
+                f"Недостаточно прав. Ваш ID: {uid}. "
+                "Добавьте его в переменную ADMIN_USER_IDS (через запятую) в .env и перезапустите сервисы."
+            )
             return
 
         if getattr(settings, "storage_mode", "yandex") != "local":
