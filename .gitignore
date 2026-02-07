@@ -10,7 +10,12 @@ data/
 .env.*
 !.env.example
 
-# local artifacts (packs/archives must live in Downloads, not repo root)
-adaspeas.zip
-adaspeas_pack_*.tar.gz
+# Архивы / пакеты
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# Временная папка пакета
 .pack/
