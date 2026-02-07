@@ -22,6 +22,7 @@
   - `docs/OPS_RUNBOOK_RU.md`
   - `docs/ROADMAP_RU.md`
   - `docs/PRD_RU.md`
+  - `docs/DOCS_RATIONALE_RU.md`
 - [ ] Если менялось архитектурное решение/инвариант: добавлен/обновлён ADR в `docs/adr/`.
 - [ ] Не добавлял(а) новые файлы в `docs/`, кроме `docs/adr/` и `docs/CHATLOG_RU.md` (иначе CI упадёт).
 

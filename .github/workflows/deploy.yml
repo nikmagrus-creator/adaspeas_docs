@@ -285,6 +285,7 @@ jobs:
             if [ "$(get_env USE_LOCAL_BOT_API)" = "1" ]; then
               must TELEGRAM_API_ID
               must TELEGRAM_API_HASH
+              must LOCAL_BOT_API_BASE
               if [ -z "${COMPOSE_PROFILES:-}" ]; then
                 export COMPOSE_PROFILES="localbotapi"
               else

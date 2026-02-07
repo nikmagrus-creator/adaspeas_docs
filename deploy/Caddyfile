@@ -6,6 +6,7 @@ bot.adaspeas.ru {
 	encode zstd gzip
 
 	@metrics path /metrics
+	# METRICS_PASS must be a hashed password (output of `caddy hash-password`), not plaintext.
 	basic_auth @metrics {
 		{$METRICS_USER} {$METRICS_PASS}
 	}
