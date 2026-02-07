@@ -9,3 +9,8 @@ data/
 .env
 .env.*
 !.env.example
+
+# local artifacts (packs/archives must live in Downloads, not repo root)
+adaspeas.zip
+adaspeas_pack_*.tar.gz
+.pack/
