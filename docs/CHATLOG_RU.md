@@ -366,3 +366,12 @@
 - `docker-compose.prod.yml`: `caddy` зависит от `bot` по `service_started`, а не по `service_healthy`.
 - Healthcheck `bot/worker`: увеличен таймаут запроса и `start_period`, чтобы не ловить false-negative на старте.
 
+### 2026-02-09 00:25 MSK
+Цель: стабилизировать прод‑деплой: bot не должен падать/уходить в unhealthy из‑за флапающих сетевых ошибок Telegram.
+
+Что сделано:
+- Bot: добавлен бесконечный loop вокруг `dp.start_polling()` с экспоненциальной паузой на сбоях сети; `TelegramUnauthorizedError` больше не приводит к crash‑loop (процесс живёт, /health остаётся доступен, повторяем попытки).
+- Compose: выровнен `healthcheck.timeout` и внутренний timeout запроса (python urlopen) чтобы Docker не убивал проверку раньше, чем она сама завершится.
+
+Следующие шаги:
+- Если bot снова станет unhealthy на VPS: снять `docker logs adaspeas-bot-1 --tail=200` и добавить алерт в `/metrics` по счетчику перезапусков polling (при необходимости).

@@ -55,9 +55,9 @@ services:
       - python
       - -c
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',
-        timeout=5).read()
+        timeout=2).read()
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 10
       start_period: 30s
     user: ${APP_UID:-1000}:${APP_GID:-1000}
@@ -85,9 +85,9 @@ services:
       - python
       - -c
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health',
-        timeout=5).read()
+        timeout=2).read()
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 10
       start_period: 30s
     user: ${APP_UID:-1000}:${APP_GID:-1000}

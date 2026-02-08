@@ -887,22 +887,52 @@ startxref
     # Background: warn about expiring access (if enabled)
     warn_task = asyncio.create_task(access_warn_scheduler())
 
+    async def polling_forever() -> None:
+        # Keep the process alive even if Telegram long-polling crashes due to transient network issues.
+        # /health is liveness (not readiness), so we prefer restart inside the process over crash-loop.
+        delay = 1
+        max_delay = 60
+        while True:
+            try:
+                await dp.start_polling(bot)
+                delay = 1
+            except TelegramUnauthorizedError as e:
+                # Token might be rotated/revoked; do not crash-loop, keep /health alive and retry slowly.
+                log.error("telegram_unauthorized", err=str(e))
+                if os.getenv("CI_SMOKE", "0") == "1":
+                    log.warning("CI_SMOKE=1; keeping service alive for health checks")
+                    await asyncio.Event().wait()
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("polling_crashed", err=str(e), retry_in_sec=delay)
+                await asyncio.sleep(delay)
+                delay = min(max_delay, max(1, delay * 2))
+
     try:
-        await dp.start_polling(bot)
-    except TelegramUnauthorizedError:
-        # In CI smoke we use a fake token; keep /health alive instead of crash-looping.
-        if os.getenv("CI_SMOKE", "0") == "1":
-            log.warning("Telegram token unauthorized in CI_SMOKE; keeping service alive for health checks")
-            await asyncio.Event().wait()
-        raise
+        await polling_forever()
     finally:
         try:
             warn_task.cancel()
         except Exception:
             pass
-        await bot.session.close()
-        await db.close()
-        await r.close()
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
+        try:
+            await db.close()
+        except Exception:
+            pass
+        try:
+            await r.close()
+        except Exception:
+            pass
+        try:
+            await runner.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
