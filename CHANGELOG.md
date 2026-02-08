@@ -3,9 +3,12 @@
 Формат: Keep a Changelog. Версионирование: SemVer (0.y.z допускается для ранней стадии).
 
 ## [Unreleased]
+- feat: уведомления пользователю и админам при финальной ошибке доставки/синка; access-control проверка в callback-ах
 - docs: усилена политика "только main" (шаблон применения паков с optional docker/pytest, инструкция чистки лишних веток origin/локально)
 
 ### Added
+- feat: аудит скачиваний (таблица download_audit) + админ-команды /audit и /stats
+- ops: скрипт deploy/backup_db.py и конкретизированы команды бэкапов в OPS_RUNBOOK_RU.md
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
 - docs: ADR-003 (фиксация изменений/идей/решений через CHANGELOG/CHATLOG/ROADMAP/ADR)
 - feat: пагинация каталога в `/categories` (настройка `CATALOG_PAGE_SIZE`)

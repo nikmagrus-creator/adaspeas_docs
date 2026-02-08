@@ -367,6 +367,66 @@ async def main() -> None:
         text = "Пользователи (последние обновлённые):\n" + "\n".join(lines)
         await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
+
+    @dp.message(Command("audit"))
+    async def audit_cmd(m: Message) -> None:
+        REQ_TOTAL.labels(command="audit").inc()
+        uid = m.from_user.id if m.from_user else 0
+        if not is_admin(uid):
+            await m.answer("Недостаточно прав.")
+            return
+
+        parts = (m.text or "").split()
+        limit = 20
+        if len(parts) >= 2 and parts[1].isdigit():
+            limit = int(parts[1])
+        limit = max(1, min(limit, 50))
+
+        rows = await db_mod.fetch_recent_download_audit(db, limit=limit, offset=0)
+        if not rows:
+            await m.answer("Аудит пока пуст.")
+            return
+
+        out = ["Аудит скачиваний (последние):"]
+        for r in rows:
+            ts = str(r.get("created_at") or "")
+            res = "✅" if r.get("result") == "succeeded" else "❌"
+            title = str(r.get("title") or r.get("path") or "")
+            if len(title) > 48:
+                title = title[:45] + "..."
+            out.append(f"{res} {ts} u={r.get('tg_user_id')} {title}")
+
+        await m.answer("\n".join(out))
+
+    @dp.message(Command("stats"))
+    async def stats_cmd(m: Message) -> None:
+        REQ_TOTAL.labels(command="stats").inc()
+        uid = m.from_user.id if m.from_user else 0
+        if not is_admin(uid):
+            await m.answer("Недостаточно прав.")
+            return
+
+        last_24h = await db_mod.count_download_audit_since(db, since_minutes=24 * 60)
+        users = await db_mod.count_users_by_status(db)
+        top_7d = await db_mod.top_downloads_since(db, since_minutes=7 * 24 * 60, limit=5)
+
+        text = (
+            "Статистика:\n"
+            f"Скачивания за 24ч: ✅ {last_24h.get('succeeded', 0)} / ❌ {last_24h.get('failed', 0)}\n"
+            "Пользователи: "
+            + ", ".join([f"{k}={v}" for k, v in sorted(users.items())])
+        )
+
+        if top_7d:
+            text += "\n\nТоп файлов (7 дней):"
+            for i, r in enumerate(top_7d, 1):
+                title = str(r.get("title") or r.get("path") or "")
+                if len(title) > 48:
+                    title = title[:45] + "..."
+                text += f"\n{i}) {r.get('count')} × {title}"
+
+        await m.answer(text)
+
     @dp.callback_query(F.data.startswith("ua:"))
     async def user_admin_cb(q: CallbackQuery) -> None:
         if not is_admin(int(q.from_user.id)):
@@ -462,6 +522,24 @@ async def main() -> None:
             await q.answer("Некорректная команда")
             return
 
+
+        async def _reply(text: str) -> None:
+            try:
+                if q.message:
+                    await q.message.answer(text)
+                else:
+                    await bot.send_message(chat_id=q.from_user.id, text=text)
+            except Exception:
+                pass
+
+        if not await ensure_active(
+            int(q.from_user.id),
+            reply_chat_id=(q.message.chat.id if q.message else q.from_user.id),
+            reply_cb=_reply,
+        ):
+            await q.answer()
+            return
+
         try:
             item = await db_mod.fetch_catalog_item(db, item_id)
         except Exception:
@@ -483,6 +561,24 @@ async def main() -> None:
             item_id = int((q.data or "").split(":", 1)[1])
         except Exception:
             await q.answer("Некорректная команда")
+            return
+
+
+        async def _reply(text: str) -> None:
+            try:
+                if q.message:
+                    await q.message.answer(text)
+                else:
+                    await bot.send_message(chat_id=q.from_user.id, text=text)
+            except Exception:
+                pass
+
+        if not await ensure_active(
+            int(q.from_user.id),
+            reply_chat_id=(q.message.chat.id if q.message else q.from_user.id),
+            reply_cb=_reply,
+        ):
+            await q.answer()
             return
 
         request_id = str(uuid.uuid4())

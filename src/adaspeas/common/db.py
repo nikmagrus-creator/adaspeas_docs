@@ -104,13 +104,41 @@ CREATE INDEX IF NOT EXISTS idx_users_status_expires ON users(status, expires_at)
 """
 
 
-TARGET_SCHEMA_VERSION = 6
+# v7: operations transparency (Milestone 3): download audit log + indexes for stats.
+MIGRATION_V7 = """
+CREATE TABLE IF NOT EXISTS download_audit (
+  id INTEGER PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  job_id INTEGER NOT NULL UNIQUE,
+  tg_chat_id INTEGER NOT NULL,
+  tg_user_id INTEGER NOT NULL,
+  catalog_item_id INTEGER NOT NULL,
+  result TEXT NOT NULL CHECK(result IN ('succeeded','failed')),
+  mode TEXT,
+  bytes INTEGER,
+  error TEXT,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_download_audit_created ON download_audit(created_at);
+CREATE INDEX IF NOT EXISTS idx_download_audit_user_created ON download_audit(tg_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_download_audit_item_created ON download_audit(catalog_item_id, created_at);
+
+-- Jobs: speed up admin queries by time window.
+CREATE INDEX IF NOT EXISTS idx_jobs_type_created ON jobs(job_type, created_at);
+"""
+
+
+
+TARGET_SCHEMA_VERSION = 7
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
     4: MIGRATION_V4,
     5: MIGRATION_V5,
     6: MIGRATION_V6,
+    7: MIGRATION_V7,
 }
 
 
@@ -598,3 +626,173 @@ async def set_meta(db: aiosqlite.Connection, key: str, value: str) -> None:
         (key, value),
     )
     await db.commit()
+
+
+# --- Operations transparency (Milestone 3): download audit + admin stats ---
+
+async def insert_download_audit(
+    db: aiosqlite.Connection,
+    *,
+    job_id: int,
+    tg_chat_id: int,
+    tg_user_id: int,
+    catalog_item_id: int,
+    result: str,
+    mode: str | None = None,
+    bytes_sent: int | None = None,
+    error: str | None = None,
+) -> None:
+    result = (result or "").strip().lower()
+    if result not in {"succeeded", "failed"}:
+        raise ValueError(f"Unknown audit result: {result}")
+    await db.execute(
+        """
+        INSERT INTO download_audit(job_id, tg_chat_id, tg_user_id, catalog_item_id, result, mode, bytes, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(job_id) DO NOTHING
+        """,
+        (
+            int(job_id),
+            int(tg_chat_id),
+            int(tg_user_id),
+            int(catalog_item_id),
+            result,
+            mode,
+            (int(bytes_sent) if bytes_sent is not None else None),
+            error,
+        ),
+    )
+    await db.commit()
+
+
+async def fetch_recent_download_audit(
+    db: aiosqlite.Connection,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict]:
+    cur = await db.execute(
+        """
+        SELECT
+          a.created_at,
+          a.job_id,
+          a.tg_chat_id,
+          a.tg_user_id,
+          a.catalog_item_id,
+          a.result,
+          a.mode,
+          a.bytes,
+          a.error,
+          c.path,
+          c.title,
+          c.size_bytes
+        FROM download_audit a
+        JOIN catalog_items c ON c.id = a.catalog_item_id
+        ORDER BY a.created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (int(limit), int(offset)),
+    )
+    rows = await cur.fetchall()
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "created_at": r[0],
+                "job_id": int(r[1]),
+                "tg_chat_id": int(r[2]),
+                "tg_user_id": int(r[3]),
+                "catalog_item_id": int(r[4]),
+                "result": r[5],
+                "mode": r[6],
+                "bytes": r[7],
+                "error": r[8],
+                "path": r[9],
+                "title": r[10],
+                "size_bytes": r[11],
+            }
+        )
+    return out
+
+
+def _sqlite_since_expr_minutes(minutes: int) -> str:
+    minutes = int(minutes)
+    if minutes <= 0:
+        minutes = 60
+    # SQLite does not accept parameterized datetime modifiers.
+    return f"datetime('now', '-{minutes} minutes')"
+
+
+async def count_download_audit_since(
+    db: aiosqlite.Connection,
+    *,
+    since_minutes: int,
+) -> dict[str, int]:
+    since_expr = _sqlite_since_expr_minutes(since_minutes)
+    cur = await db.execute(
+        f"""
+        SELECT result, COUNT(*)
+        FROM download_audit
+        WHERE created_at >= {since_expr}
+        GROUP BY result
+        """
+    )
+    rows = await cur.fetchall()
+    out: dict[str, int] = {"succeeded": 0, "failed": 0}
+    for r in rows:
+        out[str(r[0])] = int(r[1])
+    return out
+
+
+async def top_downloads_since(
+    db: aiosqlite.Connection,
+    *,
+    since_minutes: int,
+    limit: int = 10,
+) -> list[dict]:
+    since_expr = _sqlite_since_expr_minutes(since_minutes)
+    cur = await db.execute(
+        f"""
+        SELECT
+          a.catalog_item_id,
+          COUNT(*) AS cnt,
+          c.path,
+          c.title
+        FROM download_audit a
+        JOIN catalog_items c ON c.id = a.catalog_item_id
+        WHERE a.created_at >= {since_expr}
+          AND a.result = 'succeeded'
+        GROUP BY a.catalog_item_id
+        ORDER BY cnt DESC, a.catalog_item_id ASC
+        LIMIT ?
+        """,
+        (int(limit),),
+    )
+    rows = await cur.fetchall()
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "catalog_item_id": int(r[0]),
+                "count": int(r[1]),
+                "path": r[2],
+                "title": r[3],
+            }
+        )
+    return out
+
+
+async def count_users_by_status(db: aiosqlite.Connection) -> dict[str, int]:
+    cur = await db.execute(
+        """
+        SELECT status, COUNT(*)
+        FROM users
+        GROUP BY status
+        """
+    )
+    rows = await cur.fetchall()
+    out: dict[str, int] = {}
+    for r in rows:
+        out[str(r[0] or "guest")] = int(r[1])
+    return out
+

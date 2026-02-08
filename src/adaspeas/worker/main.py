@@ -29,6 +29,28 @@ JOBS_RETRIED = Counter("jobs_retried_total", "Jobs retried")
 JOB_ENQUEUE_TOTAL = Counter("jobs_enqueued_total", "Jobs enqueued total")
 
 
+async def notify_admins(bot: Bot, settings: Settings, text: str) -> None:
+    admins = settings.admin_ids_set()
+    chat_id = int(getattr(settings, "admin_notify_chat_id", 0) or 0)
+    targets: list[int] = []
+    if chat_id:
+        targets.append(chat_id)
+    else:
+        targets.extend(sorted(list(admins)))
+    for t in targets:
+        try:
+            await bot.send_message(chat_id=int(t), text=text)
+        except Exception:
+            continue
+
+
+async def notify_user(bot: Bot, chat_id: int, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=int(chat_id), text=text)
+    except Exception:
+        pass
+
+
 async def make_app() -> web.Application:
     app = web.Application()
 
@@ -248,6 +270,20 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                 await db_mod.set_job_state(db, job_id, "succeeded")
                 JOBS_SUCCEEDED.inc()
                 log.info("job_succeeded", job_id=job_id, mode="tg_file_id")
+                try:
+                    await db_mod.insert_download_audit(
+                        db,
+                        job_id=job_id,
+                        tg_chat_id=int(job["tg_chat_id"]),
+                        tg_user_id=int(job["tg_user_id"]),
+                        catalog_item_id=int(job["catalog_item_id"]),
+                        result="succeeded",
+                        mode="tg_file_id",
+                        bytes_sent=int(item.get("size_bytes") or 0) or None,
+                        error=None,
+                    )
+                except Exception:
+                    pass
                 return
             except Exception as e:
                 # If cached file_id became invalid, drop it and retry via download/upload.
@@ -274,6 +310,20 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
 
         await db_mod.set_job_state(db, job_id, "succeeded")
         JOBS_SUCCEEDED.inc()
+        try:
+            await db_mod.insert_download_audit(
+                db,
+                job_id=job_id,
+                tg_chat_id=int(job["tg_chat_id"]),
+                tg_user_id=int(job["tg_user_id"]),
+                catalog_item_id=int(job["catalog_item_id"]),
+                result="succeeded",
+                mode="upload",
+                bytes_sent=int(item.get("size_bytes") or 0) or None,
+                error=None,
+            )
+        except Exception:
+            pass
         log.info("job_succeeded", job_id=job_id)
 
     except Exception as e:
@@ -288,6 +338,39 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         else:
             await db_mod.set_job_state(db, job_id, "failed", err)
             JOBS_FAILED.inc()
+
+            # Final failure: record audit + notify.
+            if job_type == "download":
+                try:
+                    await db_mod.insert_download_audit(
+                        db,
+                        job_id=job_id,
+                        tg_chat_id=int(job["tg_chat_id"]),
+                        tg_user_id=int(job["tg_user_id"]),
+                        catalog_item_id=int(job["catalog_item_id"]),
+                        result="failed",
+                        mode=None,
+                        bytes_sent=int(item.get("size_bytes") or 0) if "item" in locals() else None,
+                        error=err,
+                    )
+                except Exception:
+                    pass
+                await notify_user(
+                    bot,
+                    int(job.get("tg_chat_id") or job.get("tg_user_id") or 0),
+                    f"❌ Не удалось отправить файл (задача #{job_id}). Сообщение: {err}",
+                )
+                await notify_admins(
+                    bot,
+                    settings,
+                    f"❌ Ошибка доставки файла: job=#{job_id}, user_id={job.get('tg_user_id')}, item_id={job.get('catalog_item_id')}. err={err}",
+                )
+            elif job_type == "sync_catalog":
+                await notify_admins(
+                    bot,
+                    settings,
+                    f"❌ Ошибка sync_catalog: job=#{job_id}. err={err}",
+                )
 
     finally:
         JOBS_RUNNING.dec()
