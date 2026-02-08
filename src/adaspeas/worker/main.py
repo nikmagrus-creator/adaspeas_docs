@@ -70,9 +70,13 @@ async def notify_admins(bot: Bot, settings: Settings, text: str) -> None:
             continue
 
 
-async def notify_user(bot: Bot, chat_id: int, text: str) -> None:
+async def notify_user(bot: Bot, settings: Settings, chat_id: int, text: str) -> None:
     try:
-        await _call_with_retry(lambda: bot.send_message(chat_id=int(chat_id), text=text), attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3), max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30))
+        await _call_with_retry(
+            lambda: bot.send_message(chat_id=int(chat_id), text=text),
+            attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3),
+            max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30),
+        )
     except Exception:
         pass
 
@@ -383,6 +387,7 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                     pass
                 await notify_user(
                     bot,
+                    settings,
                     int(job.get("tg_chat_id") or job.get("tg_user_id") or 0),
                     f"❌ Не удалось отправить файл (задача #{job_id}). Сообщение: {err}",
                 )

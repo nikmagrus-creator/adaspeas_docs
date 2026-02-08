@@ -49,6 +49,14 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
+    # Start liveness endpoints ASAP so Docker healthcheck does not depend on Telegram network.
+    # Any Telegram/DB failures should surface in logs, but /health must stay responsive.
+    app = await make_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=8080)
+    await site.start()
+
     if getattr(settings, "use_local_bot_api", 0):
         api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
         session = AiohttpSession(api=api)
@@ -57,9 +65,10 @@ async def main() -> None:
         bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
-    # Publish command list in Telegram UI
-    try:
-        await bot.set_my_commands([
+    async def _set_commands_best_effort() -> None:
+        # Telegram API may be blocked/slow on some networks; do not block startup.
+        try:
+            await asyncio.wait_for(bot.set_my_commands([
             BotCommand(command='start', description='Показать справку'),
             BotCommand(command='id', description='Показать ваш Telegram ID'),
             BotCommand(command='categories', description='Каталог'),
@@ -72,10 +81,13 @@ async def main() -> None:
             BotCommand(command='sync', description='(admin) Синхронизировать каталог'),
             BotCommand(command='audit', description='(admin) Аудит загрузок'),
             BotCommand(command='stats', description='(admin) Статистика')
-        ])
-    except Exception:
-        # Never fail bot startup because of Telegram UI cosmetics
-        pass
+            ]), timeout=10)
+        except Exception:
+            # Never fail bot startup because of Telegram UI cosmetics.
+            return
+
+    # Fire and forget.
+    asyncio.create_task(_set_commands_best_effort(), name="set_my_commands")
 
     db = await db_mod.connect(settings.sqlite_path)
     await db_mod.ensure_schema(db)
@@ -871,13 +883,6 @@ startxref
         await enqueue(r, job_id)
         JOB_ENQUEUE_TOTAL.inc()
         await m.answer(f"Ок. Поставил задачу #{job_id}.")
-
-    # Run HTTP + bot polling together
-    app = await make_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=8080)
-    await site.start()
 
     # Background: warn about expiring access (if enabled)
     warn_task = asyncio.create_task(access_warn_scheduler())

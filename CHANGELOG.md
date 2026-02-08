@@ -43,4 +43,6 @@
 - fix: /categories — реально применена настройка CATALOG_PAGE_SIZE и добавлены кнопки страниц (callback_data: nav:<id>:<offset>)
 - fix: bot: устранён NameError при завершении (storage не определён)
 - fix: worker: periodic sync больше не падает на JOB_ENQUEUE_TOTAL
+- fix: bot: /health поднимается до сетевых вызовов Telegram (быстрый healthcheck в деплое)
+- fix: worker: notify_user больше не падает на NameError (settings передаётся явно)
 - chore: удалены артефакты __pycache__/, *.pyc и .pytest_cache/ (не должны попадать в репо/архивы)
