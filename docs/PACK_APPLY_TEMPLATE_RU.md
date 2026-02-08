@@ -79,7 +79,8 @@ if test -f .pack/deleted.txt; then
     case "$p" in
       ""|\#*) continue ;;
     esac
-    git rm -r --ignore-unmatch -- "$p" >/dev/null 2>&1 || rm -rf -- "$p"
+    git rm -r --ignore-unmatch -- "$p" >/dev/null 2>&1 || true
+    rm -rf -- "$p"
   done < .pack/deleted.txt
 fi &&
 
@@ -91,6 +92,10 @@ if command -v docker >/dev/null 2>&1; then docker compose config >/dev/null; els
 # Тесты (если pytest установлен)
 if command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then make test || true; else echo "pytest отсутствует, пропускаю make test"; fi &&
 
+# Защита от "мусора копипаста": если внезапно создался файл вида :contentReference..., удаляем его и не коммитим.
+if ls -1 :contentReference* >/dev/null 2>&1; then
+  rm -f :contentReference*
+fi &&
 git add -A &&
 
 # Если pack не дал изменений, не коммитим
@@ -109,11 +114,13 @@ fi
 - Пакеты распаковываются **только локально**. На VPS изменения приезжают через `git pull` из `main`.
 - Если тебе прислали "полный zip репозитория" и внутри есть `.git/`, **не распаковывай его поверх своего репозитория**. Нужен именно инкрементальный pack.
 
-Актуально на: 2026-02-08 21:00 MSK
+- Если после вставки команд в терминал появился странный файл вида `:contentReference[...]` — это результат случайного символа `>` в скопированном тексте (редирект создаёт файл). Такой файл удаляем и игнорируем (см. `.gitignore`).
+Актуально на: 2026-02-08 22:30 MSK
 
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-08 22:30 MSK | ChatGPT | doc | Фикс удаления по `.pack/deleted.txt` (rm всегда выполняется); защита от мусора `:contentReference*` (копипаст/редирект) + ignore/авто-удаление перед `git add -A` | |
 | 2026-02-07 19:45 MSK | ChatGPT | doc | Добавлено: авто-вынесение adaspeas.zip перед проверкой repo clean; уточнено: артефакты pack/zip хранить вне репо | |
 | 2026-02-07 17:59 MSK | ChatGPT | doc | Уточнено: pack в чате всегда сопровождается этим блоком команд с подставленным именем файла и commit message | |
 | 2026-02-07 16:10 MSK | ChatGPT | doc | Добавлен безопасный пролог (abort/reset к origin/main), убран мусор в требованиях, добавлена защита от пустого коммита | |

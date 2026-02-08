@@ -10,6 +10,9 @@ data/
 adaspeas.zip
 adaspeas_pack_*.tar.gz
 
+# защита от мусора при копировании команд из чата
+:contentReference*
+
 # dotenv (must not be tracked)
 .env
 .env.*
