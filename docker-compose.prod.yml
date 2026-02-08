@@ -57,9 +57,9 @@ services:
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',
         timeout=2).read()
       interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
     user: ${APP_UID:-1000}:${APP_GID:-1000}
   worker:
     image: ${IMAGE}
@@ -87,9 +87,9 @@ services:
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health',
         timeout=2).read()
       interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
     user: ${APP_UID:-1000}:${APP_GID:-1000}
   caddy:
     image: caddy:2-alpine
@@ -109,6 +109,7 @@ services:
     - caddy_config:/config
     depends_on:
       bot:
+        # Caddy can start even if bot is warming up; health gates are checked separately.
         condition: service_started
 volumes:
   tg_api_data: null

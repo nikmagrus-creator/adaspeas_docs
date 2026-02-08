@@ -10,7 +10,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-from aiogram.exceptions import TelegramUnauthorizedError
+from aiogram.exceptions import TelegramUnauthorizedError, TelegramNetworkError, TelegramServerError
 from aiohttp import web
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 import structlog
@@ -26,11 +26,23 @@ REQ_TOTAL = Counter("bot_requests_total", "Bot requests total", ["command"])
 JOB_ENQUEUE_TOTAL = Counter("jobs_enqueued_total", "Jobs enqueued total")
 
 
-async def make_app() -> web.Application:
+async def make_app(state: dict) -> web.Application:
     app = web.Application()
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
+
+    async def ready(_request: web.Request) -> web.Response:
+        # Readiness is best-effort and informative.
+        # Liveness (/health) must stay simple and fast.
+        return web.json_response(
+            {
+                "ok": True,
+                "polling": state.get("polling"),
+                "last_poll_error": state.get("last_poll_error"),
+                "last_poll_ok_at": state.get("last_poll_ok_at"),
+            }
+        )
 
     async def metrics(_request: web.Request) -> web.Response:
         payload = generate_latest()
@@ -41,6 +53,7 @@ async def make_app() -> web.Application:
 
     app.router.add_get("/", root)
     app.router.add_get("/health", health)
+    app.router.add_get("/ready", ready)
     app.router.add_get("/metrics", metrics)
     return app
 
@@ -49,9 +62,15 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
+    state: dict = {
+        "polling": "starting",
+        "last_poll_error": None,
+        "last_poll_ok_at": None,
+    }
+
     # Start liveness endpoints ASAP so Docker healthcheck does not depend on Telegram network.
     # Any Telegram/DB failures should surface in logs, but /health must stay responsive.
-    app = await make_app()
+    app = await make_app(state)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=8080)
@@ -887,52 +906,62 @@ startxref
     # Background: warn about expiring access (if enabled)
     warn_task = asyncio.create_task(access_warn_scheduler())
 
-    async def polling_forever() -> None:
-        # Keep the process alive even if Telegram long-polling crashes due to transient network issues.
-        # /health is liveness (not readiness), so we prefer restart inside the process over crash-loop.
-        delay = 1
-        max_delay = 60
-        while True:
-            try:
-                await dp.start_polling(bot)
-                delay = 1
-            except TelegramUnauthorizedError as e:
-                # Token might be rotated/revoked; do not crash-loop, keep /health alive and retry slowly.
-                log.error("telegram_unauthorized", err=str(e))
-                if os.getenv("CI_SMOKE", "0") == "1":
-                    log.warning("CI_SMOKE=1; keeping service alive for health checks")
-                    await asyncio.Event().wait()
-                await asyncio.sleep(60)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.warning("polling_crashed", err=str(e), retry_in_sec=delay)
-                await asyncio.sleep(delay)
-                delay = min(max_delay, max(1, delay * 2))
+    # Keep the process alive even if Telegram long polling temporarily fails.
+    # Otherwise the container may flap (unhealthy) and block deployments.
+    backoff = 1
+    max_backoff = int(getattr(settings, "net_retry_max_sec", 30) or 30)
 
     try:
-        await polling_forever()
+        while True:
+            try:
+                state["polling"] = "running"
+                state["last_poll_error"] = None
+
+                # Quick handshake: makes /ready useful and avoids silent crash-loops.
+                # Liveness (/health) stays up regardless.
+                try:
+                    await asyncio.wait_for(bot.get_me(), timeout=10)
+                    from datetime import datetime, timezone
+
+                    state["last_poll_ok_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                except TelegramUnauthorizedError:
+                    # fall through to the main handler below
+                    raise
+
+                await dp.start_polling(bot)
+                # Normal exit (e.g., cancelled/shutdown)
+                break
+            except asyncio.CancelledError:
+                raise
+            except TelegramUnauthorizedError:
+                # In CI smoke we use a fake token; keep /health alive instead of crash-looping.
+                if os.getenv("CI_SMOKE", "0") == "1":
+                    log.warning("Telegram token unauthorized in CI_SMOKE; keeping service alive for health checks")
+                    await asyncio.Event().wait()
+                raise
+            except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError, ConnectionError) as e:
+                state["polling"] = "retrying"
+                state["last_poll_error"] = str(e)
+                log.warning("polling_error_retry", err=str(e), backoff_s=backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, max(1, backoff * 2))
+                continue
+            except Exception as e:
+                # Unknown error: retry, but keep it visible.
+                state["polling"] = "retrying"
+                state["last_poll_error"] = str(e)
+                log.exception("polling_error_retry_unknown", err=str(e), backoff_s=backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, max(1, backoff * 2))
+                continue
     finally:
         try:
             warn_task.cancel()
         except Exception:
             pass
-        try:
-            await bot.session.close()
-        except Exception:
-            pass
-        try:
-            await db.close()
-        except Exception:
-            pass
-        try:
-            await r.close()
-        except Exception:
-            pass
-        try:
-            await runner.cleanup()
-        except Exception:
-            pass
+        await bot.session.close()
+        await db.close()
+        await r.close()
 
 
 if __name__ == "__main__":

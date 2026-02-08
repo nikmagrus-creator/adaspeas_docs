@@ -291,6 +291,16 @@ jobs:
             set -euo pipefail
             export APP_DIR="${APP_DIR:-/opt/adaspeas}"
             export IMAGE="${IMAGE:-${{ needs.build.outputs.image }}}"
+
+            dump_state() {
+              echo "\n=== docker compose ps (prod) ==="
+              docker compose -f docker-compose.prod.yml ps || true
+              echo "\n=== docker compose logs (tail, prod) ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail 200 bot worker caddy || true
+            }
+
+            # If something goes wrong, show container state/logs to avoid "bot is unhealthy" guesswork.
+            trap 'echo "\nDEPLOY FAILED"; dump_state' ERR
             if [ ! -d "$APP_DIR" ]; then
               echo "APP_DIR $APP_DIR does not exist. Run deploy/bootstrap_vps.sh on the server first."
               exit 2
@@ -360,6 +370,35 @@ jobs:
 
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            wait_healthy() {
+              svc="$1"
+              id="$(docker compose -f docker-compose.prod.yml ps -q "$svc" || true)"
+              if [ -z "$id" ]; then
+                echo "Service $svc not found"
+                exit 4
+              fi
+              for i in $(seq 1 60); do
+                st="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id" 2>/dev/null || true)"
+                if [ "$st" = "healthy" ]; then
+                  echo "$svc: healthy"
+                  return 0
+                fi
+                if [ "$st" = "unhealthy" ]; then
+                  echo "$svc: unhealthy"
+                  dump_state
+                  exit 5
+                fi
+                sleep 2
+              done
+              echo "$svc: health timeout"
+              dump_state
+              exit 5
+            }
+
+            wait_healthy bot
+            wait_healthy worker
+
             docker compose -f docker-compose.prod.yml restart caddy
             docker image prune -f
         env:

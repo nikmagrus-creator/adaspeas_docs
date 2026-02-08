@@ -360,18 +360,11 @@
 - Worker: исправлен notify_user (settings передаётся явно), чтобы не было NameError при обработке ошибок.
 
 ### 2026-02-08 23:55 MSK
-Цель: убрать флапающий прод‑деплой из-за ожидания bot=healthy.
+Цель: устранить flapping bot и сделать деплой диагностируемым.
 
 Что сделано:
-- `docker-compose.prod.yml`: `caddy` зависит от `bot` по `service_started`, а не по `service_healthy`.
-- Healthcheck `bot/worker`: увеличен таймаут запроса и `start_period`, чтобы не ловить false-negative на старте.
-
-### 2026-02-09 00:25 MSK
-Цель: стабилизировать прод‑деплой: bot не должен падать/уходить в unhealthy из‑за флапающих сетевых ошибок Telegram.
-
-Что сделано:
-- Bot: добавлен бесконечный loop вокруг `dp.start_polling()` с экспоненциальной паузой на сбоях сети; `TelegramUnauthorizedError` больше не приводит к crash‑loop (процесс живёт, /health остаётся доступен, повторяем попытки).
-- Compose: выровнен `healthcheck.timeout` и внутренний timeout запроса (python urlopen) чтобы Docker не убивал проверку раньше, чем она сама завершится.
-
-Следующие шаги:
-- Если bot снова станет unhealthy на VPS: снять `docker logs adaspeas-bot-1 --tail=200` и добавить алерт в `/metrics` по счетчику перезапусков polling (при необходимости).
+- Bot: `start_polling` обёрнут в цикл с retry/backoff (сетевые/временные ошибки Telegram больше не валят процесс).
+- Bot: добавлен `/ready` с диагностикой состояния polling (liveness `/health` остаётся простым и быстрым).
+- Prod compose: `caddy` больше не ждёт `service_healthy` у bot (только `service_started`), чтобы не блокировать `docker compose up`.
+- Healthcheck: увеличены `retries/start_period` для bot/worker в dev/prod.
+- Deploy workflow: добавлен `trap` + автоматический дамп `docker compose ps` и tail-логов при ошибке, и явное ожидание `healthy` для bot/worker.
