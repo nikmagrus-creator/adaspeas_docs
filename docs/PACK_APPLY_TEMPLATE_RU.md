@@ -66,9 +66,23 @@ tar -xzf "$PACK" -C . &&
 
 # Применить удаления из .pack/deleted.txt (если есть)
 if test -f .pack/deleted.txt; then
-  while IFS= read -r p; do
+  while IFS= read -r p || test -n "$p"; do
+    # Нормализация на случай CRLF
+    p="${p%$''}"
     test -n "$p" || continue
-    git rm -r --ignore-unmatch "$p" >/dev/null 2>&1 || rm -rf "$p"
+
+    # Защита от удаления вне репозитория
+    case "$p" in
+      /*|..|../*|*/../*|*"/.."|*"/../"*)
+        echo "Небезопасный путь в .pack/deleted.txt: $p"
+        false
+        ;;
+    esac
+
+    # git rm с --ignore-unmatch может вернуть 0 даже если ничего не удалил,
+    # поэтому физическое удаление делаем всегда.
+    git rm -r --ignore-unmatch -- "$p" >/dev/null 2>&1 || true
+    rm -rf -- "$p"
   done < .pack/deleted.txt
 fi &&
 
