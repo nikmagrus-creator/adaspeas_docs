@@ -41,6 +41,9 @@ async def make_app(state: dict) -> web.Application:
                 "polling": state.get("polling"),
                 "last_poll_error": state.get("last_poll_error"),
                 "last_poll_ok_at": state.get("last_poll_ok_at"),
+                "db": state.get("db"),
+                "redis": state.get("redis"),
+                "last_init_error": state.get("last_init_error"),
             }
         )
 
@@ -66,6 +69,9 @@ async def main() -> None:
         "polling": "starting",
         "last_poll_error": None,
         "last_poll_ok_at": None,
+        "db": "starting",
+        "redis": "starting",
+        "last_init_error": None,
     }
 
     # Start liveness endpoints ASAP so Docker healthcheck does not depend on Telegram network.
@@ -84,6 +90,50 @@ async def main() -> None:
         bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
+
+    async def _init_db_with_retry() -> db_mod.Connection:
+        backoff = 1
+        max_backoff = int(getattr(settings, "net_retry_max_sec", 30) or 30)
+        while True:
+            try:
+                dbi = await db_mod.connect(settings.sqlite_path)
+                await db_mod.ensure_schema(dbi)
+                state["db"] = "ok"
+                state["last_init_error"] = None if state.get("redis") == "ok" else state.get("last_init_error")
+                return dbi
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                state["db"] = "retrying"
+                state["last_init_error"] = f"db: {e}"
+                log.error("db_init_retry", err=str(e), backoff_s=backoff)
+                # avoid tight crash loops; keep /health alive
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, max(1, backoff * 2))
+
+    async def _init_redis_with_retry() -> object:
+        backoff = 1
+        max_backoff = int(getattr(settings, "net_retry_max_sec", 30) or 30)
+        while True:
+            try:
+                rr = await get_redis(settings.redis_url)
+                try:
+                    await rr.ping()
+                except Exception:
+                    # Some Redis servers delay accept; treat as init failure.
+                    raise
+                state["redis"] = "ok"
+                state["last_init_error"] = None if state.get("db") == "ok" else state.get("last_init_error")
+                return rr
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                state["redis"] = "retrying"
+                state["last_init_error"] = f"redis: {e}"
+                log.error("redis_init_retry", err=str(e), backoff_s=backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, max(1, backoff * 2))
+
     async def _set_commands_best_effort() -> None:
         # Telegram API may be blocked/slow on some networks; do not block startup.
         try:
@@ -99,7 +149,8 @@ async def main() -> None:
             BotCommand(command='download', description='Скачать файл по id из /list'),
             BotCommand(command='sync', description='(admin) Синхронизировать каталог'),
             BotCommand(command='audit', description='(admin) Аудит загрузок'),
-            BotCommand(command='stats', description='(admin) Статистика')
+            BotCommand(command='stats', description='(admin) Статистика'),
+            BotCommand(command='diag', description='(admin) Диагностика')
             ]), timeout=10)
         except Exception:
             # Never fail bot startup because of Telegram UI cosmetics.
@@ -108,10 +159,9 @@ async def main() -> None:
     # Fire and forget.
     asyncio.create_task(_set_commands_best_effort(), name="set_my_commands")
 
-    db = await db_mod.connect(settings.sqlite_path)
-    await db_mod.ensure_schema(db)
+    db = await _init_db_with_retry()
 
-    r = await get_redis(settings.redis_url)
+    r = await _init_redis_with_retry()
 
     # Catalog navigation root (UI читает только SQLite; синхронизацию делает worker по /sync).
     storage_mode = (getattr(settings, "storage_mode", "yandex") or "yandex").strip().lower()
@@ -148,6 +198,47 @@ async def main() -> None:
             return False
         admins = settings.admin_ids_set()
         return bool(admins and uid in admins)
+
+    @dp.message(Command("diag"))
+    async def cmd_diag(m: Message) -> None:
+        REQ_TOTAL.labels(command="diag").inc()
+        uid = int(getattr(m.from_user, "id", 0) or 0)
+        if not is_admin(uid):
+            await m.answer("Команда доступна только администратору.")
+            return
+
+        lines: list[str] = []
+        lines.append("Диагностика (bot)")
+        lines.append(f"polling={state.get('polling')} db={state.get('db')} redis={state.get('redis')}")
+        if state.get("last_init_error"):
+            lines.append(f"last_init_error={state.get('last_init_error')}")
+        if state.get("last_poll_error"):
+            lines.append(f"last_poll_error={state.get('last_poll_error')}")
+        if state.get("last_poll_ok_at"):
+            lines.append(f"last_poll_ok_at={state.get('last_poll_ok_at')}")
+
+        # DB diagnostics (best-effort)
+        try:
+            sv = await db_mod.get_schema_version(db)
+            lines.append(f"schema_version={sv}")
+            # lightweight counts
+            users_by = await db_mod.group_count(db, "users", "status")
+            lines.append("users=" + ", ".join([f"{k}:{v}" for k, v in sorted(users_by.items())]) if users_by else "users=0")
+            items = await db_mod.count_rows(db, "catalog_items")
+            lines.append(f"catalog_items={items}")
+        except Exception as e:
+            lines.append(f"db_diag_error={e}")
+
+        # Redis diagnostics
+        try:
+            from adaspeas.common.queue import QUEUE_KEY
+            qlen = await r.llen(QUEUE_KEY)
+            lines.append(f"queue_len={int(qlen)}")
+        except Exception as e:
+            lines.append(f"redis_diag_error={e}")
+
+        await m.answer("\n".join(lines))
+
 
     async def ensure_user(uid: int) -> dict:
         await db_mod.upsert_user(db, uid)

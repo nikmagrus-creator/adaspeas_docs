@@ -205,6 +205,31 @@ async def _get_schema_version(db: aiosqlite.Connection) -> int:
     return int(row[0])
 
 
+async def get_schema_version(db: aiosqlite.Connection) -> int:
+    """Return current schema version (0 if DB is uninitialized)."""
+    return await _get_schema_version(db)
+
+
+async def count_rows(db: aiosqlite.Connection, table: str) -> int:
+    """Best-effort row count for diagnostics."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", table or ""):
+        raise ValueError("Invalid table name")
+    cur = await db.execute(f"SELECT COUNT(*) FROM {table}")
+    row = await cur.fetchone()
+    return int(row[0] or 0)
+
+
+async def group_count(db: aiosqlite.Connection, table: str, column: str) -> dict[str, int]:
+    """Best-effort grouped counts for diagnostics."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", table or "") or not re.fullmatch(r"[A-Za-z0-9_]+", column or ""):
+        raise ValueError("Invalid table/column")
+    cur = await db.execute(f"SELECT {column}, COUNT(*) FROM {table} GROUP BY {column}")
+    out: dict[str, int] = {}
+    async for row in cur:
+        out[str(row[0])] = int(row[1] or 0)
+    return out
+
+
 async def ensure_schema(db: aiosqlite.Connection) -> None:
     # Base schema
     await db.executescript(SCHEMA_V1)

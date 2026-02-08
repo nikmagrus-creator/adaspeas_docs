@@ -24,6 +24,31 @@
 3) Если массовые 429/таймауты — временно выключить шумные задачи (уведомления/синхронизацию), оставив базовый UI.
 4) Если сломалась доставка файлов — фиксировать ошибку в аудит и уведомить админов (как минимум: каждому из `ADMIN_USER_IDS`).
 
+## 2.0) Если сервисы стали unhealthy
+
+На проде liveness `/health` всегда должен отвечать быстро. Дополнительно:
+- bot: `/ready` показывает состояние polling и последние ошибки инициализации (DB/Redis/Telegram).
+- worker: `/ready` показывает состояние воркера, инициализацию DB/Redis и время последней выполненной задачи.
+
+Если деплой/compose падает на `... bot is unhealthy`:
+
+1) Посмотреть состояние контейнеров:
+- `docker compose -f docker-compose.prod.yml ps`
+
+2) Посмотреть логи (хватит 200 строк):
+- `docker compose -f docker-compose.prod.yml logs --no-color --tail 200 bot worker`
+
+3) Проверить readiness изнутри VPS:
+- `curl -fsS http://127.0.0.1:8080/ready || true`
+- `curl -fsS http://127.0.0.1:8081/ready || true`
+
+4) Посмотреть Docker health status точечно:
+- `docker inspect --format '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' $(docker compose -f docker-compose.prod.yml ps -q bot worker)`
+
+Если `/ready` показывает `db=retrying` или `redis=retrying`:
+- проверить пути/права на volume (`SQLITE_PATH`, каталог для файла, доступность Redis);
+- это не должно убивать процесс, но будет видно как `last_error/last_init_error`.
+
 ## 2.1) Управление на VPS (важно)
 
 На VPS в `/opt/adaspeas` **в проде** нужно использовать `docker-compose.prod.yml` (или systemd unit из `deploy/bootstrap_vps.sh`).

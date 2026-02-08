@@ -368,3 +368,14 @@
 - Prod compose: `caddy` больше не ждёт `service_healthy` у bot (только `service_started`), чтобы не блокировать `docker compose up`.
 - Healthcheck: увеличены `retries/start_period` для bot/worker в dev/prod.
 - Deploy workflow: добавлен `trap` + автоматический дамп `docker compose ps` и tail-логов при ошибке, и явное ожидание `healthy` для bot/worker.
+
+### 2026-02-09 00:30 MSK
+Цель: усилить диагностируемость и убрать падения bot/worker при временно недоступных DB/Redis, плюс зафиксировать каноничный способ сборки полного архива без мусора.
+
+Что сделано:
+- Bot: инициализация SQLite/Redis обёрнута в retry/backoff (процесс не падает, /health остаётся живым).
+- Bot: расширен `/ready` (DB/Redis + last_init_error) и добавлен `/diag` для admin (schema_version, counts, queue_len).
+- Worker: добавлен `/ready` со статусом и last_job_at; инициализация DB/Redis обёрнута в retry/backoff.
+- OPS_RUNBOOK: добавлен чек-лист для кейса `bot/worker unhealthy`.
+- Deploy: добавлен `deploy/make_ai_archive.sh` для сборки чистого исходного архива через `git archive` (без `.git`, кэшей и `.env`).
+
