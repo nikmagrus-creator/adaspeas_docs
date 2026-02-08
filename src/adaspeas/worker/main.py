@@ -26,6 +26,7 @@ JOBS_RUNNING = Gauge("jobs_running", "Number of jobs running")
 JOBS_SUCCEEDED = Counter("jobs_succeeded_total", "Jobs succeeded")
 JOBS_FAILED = Counter("jobs_failed_total", "Jobs failed")
 JOBS_RETRIED = Counter("jobs_retried_total", "Jobs retried")
+JOB_ENQUEUE_TOTAL = Counter("jobs_enqueued_total", "Jobs enqueued total")
 
 
 async def make_app() -> web.Application:

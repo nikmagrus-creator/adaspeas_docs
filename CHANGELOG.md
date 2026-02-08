@@ -35,3 +35,7 @@
 - ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data)
 - ops: в docker-compose.yml добавлен init-app-data для первого запуска (Docker может создать ./data как root:root)
 - docs: уточнены правила запуска на VPS (использовать docker-compose.prod.yml / systemd unit)
+- fix: /categories — реально применена настройка CATALOG_PAGE_SIZE и добавлены кнопки страниц (callback_data: nav:<id>:<offset>)
+- fix: bot: устранён NameError при завершении (storage не определён)
+- fix: worker: periodic sync больше не падает на JOB_ENQUEUE_TOTAL
+- chore: удалены артефакты __pycache__/, *.pyc и .pytest_cache/ (не должны попадать в репо/архивы)

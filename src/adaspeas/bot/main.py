@@ -48,6 +48,9 @@ async def main() -> None:
     settings = Settings()
     setup_logging(settings.log_level)
 
+    # Bot does not use storage directly (worker does). Keep variable for safe cleanup paths.
+    storage = None
+
     if getattr(settings, "use_local_bot_api", 0):
         api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
         session = AiohttpSession(api=api)
@@ -62,6 +65,7 @@ async def main() -> None:
             BotCommand(command='start', description='Показать справку'),
             BotCommand(command='id', description='Показать ваш Telegram ID'),
             BotCommand(command='categories', description='Каталог'),
+            BotCommand(command='seed', description='(admin) Добавить тестовый файл (local)'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
             BotCommand(command='download', description='Скачать файл по id из /list'),
             BotCommand(command='sync', description='(admin) Синхронизировать каталог')
@@ -113,14 +117,42 @@ async def main() -> None:
         parent_path=None,
     )
 
-    async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
-        children = await db_mod.fetch_children(db, path, limit=60)
+    async def render_dir(
+        path: str,
+        *,
+        offset: int = 0,
+        viewer_tg_user_id: int | None = None,
+    ) -> tuple[str, InlineKeyboardMarkup]:
+        page_size = int(getattr(settings, "catalog_page_size", 25) or 25)
+        if page_size < 1:
+            page_size = 1
+        if page_size > 60:
+            page_size = 60
+
+        # Fetch one extra to detect "next page".
+        raw = await db_mod.fetch_children(db, path, limit=page_size + 1, offset=int(offset))
+        has_next = len(raw) > page_size
+        children = raw[:page_size]
         kb: list[list[InlineKeyboardButton]] = []
         for ch in children:
             is_folder = ch.get("kind") == "folder"
-            cb = f"nav:{ch['id']}" if is_folder else f"dl:{ch['id']}"
+            cb = f"nav:{ch['id']}:0" if is_folder else f"dl:{ch['id']}"
             label = ("📁 " if is_folder else "📄 ") + str(ch.get("title") or "")
             kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
+
+        # Pagination controls for current folder.
+        cur_item = await db_mod.fetch_catalog_item_by_path(db, path)
+        if cur_item is not None:
+            cur_id = int(cur_item["id"])
+            nav_row: list[InlineKeyboardButton] = []
+            if int(offset) > 0:
+                prev_off = max(0, int(offset) - page_size)
+                nav_row.append(InlineKeyboardButton(text="◀️ Пред.", callback_data=f"nav:{cur_id}:{prev_off}"))
+            if has_next:
+                next_off = int(offset) + page_size
+                nav_row.append(InlineKeyboardButton(text="▶️ След.", callback_data=f"nav:{cur_id}:{next_off}"))
+            if nav_row:
+                kb.append(nav_row)
 
         # Nav controls
         back = parent_of(path)
@@ -137,7 +169,7 @@ async def main() -> None:
                 )
                 parent_item = await db_mod.fetch_catalog_item_by_path(db, back)
             if parent_item is not None:
-                kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"nav:{parent_item['id']}")])
+                kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"nav:{parent_item['id']}:0")])
 
         # Root shortcut
         if path != root_path:
@@ -153,7 +185,7 @@ async def main() -> None:
                 )
                 root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
             if root_item is not None:
-                kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}")])
+                kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}:0")])
 
         text = f"{title_of(path)}"
         last_sync = await db_mod.get_meta(db, 'catalog_last_sync_at')
@@ -202,7 +234,7 @@ async def main() -> None:
     async def categories(m: Message) -> None:
         REQ_TOTAL.labels(command="categories").inc()
         # Inline navigation UI (no long callback_data, only numeric ids).
-        text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
+        text, markup = await render_dir(root_path, offset=0, viewer_tg_user_id=m.from_user.id if m.from_user else None)
         await m.answer(text, reply_markup=markup)
 
     @dp.message(Command("sync"))
@@ -244,7 +276,9 @@ async def main() -> None:
     @dp.callback_query(F.data.startswith("nav:"))
     async def nav_cb(q: CallbackQuery) -> None:
         try:
-            item_id = int((q.data or "").split(":", 1)[1])
+            parts = (q.data or "").split(":")
+            item_id = int(parts[1])
+            offset = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
         except Exception:
             await q.answer("Некорректная команда")
             return
@@ -259,7 +293,11 @@ async def main() -> None:
             await q.answer("Это не папка")
             return
 
-        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
+        text, markup = await render_dir(
+            str(item.get("path") or root_path),
+            offset=offset,
+            viewer_tg_user_id=q.from_user.id,
+        )
         if q.message:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()
@@ -403,6 +441,7 @@ startxref
             await asyncio.Event().wait()
         raise
     finally:
+        # Bot itself doesn't hold storage connections (worker does), but keep this safe.
         try:
             if storage is not None:
                 await storage.close()
