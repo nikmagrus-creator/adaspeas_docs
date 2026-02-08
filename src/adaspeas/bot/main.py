@@ -217,6 +217,7 @@ async def main() -> None:
         await m.answer(
             "Привет. Это Adaspeas MVP.\n\n"
             "Команды:\n"
+            "/id - показать свой Telegram ID\n"
             "/categories - показать каталог\n"
             "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
             "/sync - (admin) синхронизировать каталог в фоне (worker)\n"
@@ -225,6 +226,15 @@ async def main() -> None:
         )
 
 
+
+    @dp.message(Command("id"))
+    async def show_id(m: Message) -> None:
+        REQ_TOTAL.labels(command="id").inc()
+        if not m.from_user:
+            await m.answer("Не удалось определить ваш ID.")
+            return
+        await m.answer(f"Ваш Telegram ID: {m.from_user.id}")
+
     @dp.message(Command("categories"))
     async def categories(m: Message) -> None:
         REQ_TOTAL.labels(command="categories").inc()
@@ -232,16 +242,7 @@ async def main() -> None:
         text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
         await m.answer(text, reply_markup=markup)
 
-    
-
-@dp.message(Command("id"))
-async def show_id(m: Message) -> None:
-    REQ_TOTAL.labels(command="id").inc()
-    if not m.from_user:
-        await m.answer("Не удалось определить ваш ID.")
-        return
-    await m.answer(f"Ваш Telegram ID: {m.from_user.id}")
-@dp.message(Command("sync"))
+    @dp.message(Command("sync"))
     async def sync_catalog(m: Message) -> None:
         REQ_TOTAL.labels(command="sync").inc()
         admins = settings.admin_ids_set()
