@@ -50,16 +50,16 @@ git reset --hard origin/main &&
 git pull --ff-only &&
 
 # Если в корне репозитория лежит adaspeas.zip (архив для анализа), вынеси его из репо,
-# чтобы не поймать 'Repo dirty' до распаковки pack.
+# чтобы не поймать 'репозиторий не чистый' до распаковки pack.
 if test -f adaspeas.zip; then
   mv -v adaspeas.zip "/media/nik/0C30B3CF30B3BE50/Загрузки/" || true
 fi &&
 
 # Repo должен быть чистым перед применением pack
-test -z "$(git status --porcelain)" || { echo "Repo dirty. Commit/stash first."; git status --porcelain; false; } &&
+test -z "$(git status --porcelain)" || { echo "Репозиторий не чистый. Сначала закоммить/убери изменения и повтори.";  git status --porcelain; false; } &&
 
 PACK="/media/nik/0C30B3CF30B3BE50/Загрузки/<PACK_NAME>.tar.gz" &&
-test -f "$PACK" || { echo "Pack not found: $PACK"; false; } &&
+test -f "$PACK" || { echo "Пак не найден: $PACK"; false; } &&
 
 # Распаковать pack поверх репозитория
 tar -xzf "$PACK" -C . &&
@@ -84,7 +84,7 @@ git add -A &&
 
 # Если pack не дал изменений, не коммитим
 if test -z "$(git status --porcelain)"; then
-  echo "No changes after pack (already applied or empty).";
+  echo "Изменений нет: pack уже применён или пустой.";
   true;
 else
   git status --porcelain &&

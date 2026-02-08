@@ -60,7 +60,7 @@ async def main() -> None:
     try:
         await bot.set_my_commands([
             BotCommand(command='start', description='Показать справку'),
-            BotCommand(command='id', description='Показать свой Telegram ID'),
+            BotCommand(command='id', description='Показать ваш Telegram ID'),
             BotCommand(command='categories', description='Каталог'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
             BotCommand(command='download', description='Скачать файл по id из /list'),
@@ -113,45 +113,14 @@ async def main() -> None:
         parent_path=None,
     )
 
-    async def render_dir(
-        path: str,
-        *,
-        page: int = 0,
-        viewer_tg_user_id: int | None = None,
-    ) -> tuple[str, InlineKeyboardMarkup]:
-        page_size = int(getattr(settings, "catalog_page_size", 25) or 25)
-        # Telegram inline keyboards are limited; keep it sane.
-        if page_size < 5:
-            page_size = 5
-        if page_size > 50:
-            page_size = 50
-
-        total = await db_mod.count_children(db, path)
-        max_page = 0 if total <= 0 else max(0, (total - 1) // page_size)
-        if page < 0:
-            page = 0
-        if page > max_page:
-            page = max_page
-
-        children = await db_mod.fetch_children(db, path, limit=page_size, offset=page * page_size)
+    async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
+        children = await db_mod.fetch_children(db, path, limit=60)
         kb: list[list[InlineKeyboardButton]] = []
         for ch in children:
             is_folder = ch.get("kind") == "folder"
-            cb = f"nav:{ch['id']}:0" if is_folder else f"dl:{ch['id']}"
+            cb = f"nav:{ch['id']}" if is_folder else f"dl:{ch['id']}"
             label = ("📁 " if is_folder else "📄 ") + str(ch.get("title") or "")
             kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
-
-        # Paging controls for the current directory
-        self_item = await db_mod.fetch_catalog_item_by_path(db, path)
-        self_id = int(self_item["id"]) if self_item else None
-        if self_id is not None and max_page > 0:
-            row: list[InlineKeyboardButton] = []
-            if page > 0:
-                row.append(InlineKeyboardButton(text="◀️", callback_data=f"nav:{self_id}:{page - 1}"))
-            if page < max_page:
-                row.append(InlineKeyboardButton(text="▶️", callback_data=f"nav:{self_id}:{page + 1}"))
-            if row:
-                kb.append(row)
 
         # Nav controls
         back = parent_of(path)
@@ -190,12 +159,6 @@ async def main() -> None:
         last_sync = await db_mod.get_meta(db, 'catalog_last_sync_at')
         if last_sync:
             text += f"\n\nОбновлено: {last_sync}"
-            deleted = await db_mod.get_meta(db, 'catalog_last_sync_deleted')
-            if deleted is not None:
-                text += f"\nУдалено: {deleted}"
-
-        if max_page > 0:
-            text += f"\nСтраница: {page + 1}/{max_page + 1} (элементов: {total})"
         admins = settings.admin_ids_set()
         is_admin = bool(viewer_tg_user_id and admins and viewer_tg_user_id in admins)
         # Admins can see the underlying path for debugging.
@@ -217,7 +180,6 @@ async def main() -> None:
         await m.answer(
             "Привет. Это Adaspeas MVP.\n\n"
             "Команды:\n"
-            "/id - показать свой Telegram ID\n"
             "/categories - показать каталог\n"
             "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
             "/sync - (admin) синхронизировать каталог в фоне (worker)\n"
@@ -228,12 +190,13 @@ async def main() -> None:
 
 
     @dp.message(Command("id"))
-    async def show_id(m: Message) -> None:
+    async def whoami(m: Message) -> None:
         REQ_TOTAL.labels(command="id").inc()
         if not m.from_user:
-            await m.answer("Не удалось определить ваш ID.")
+            await m.answer("Не удалось определить ваш Telegram ID.")
             return
         await m.answer(f"Ваш Telegram ID: {m.from_user.id}")
+
 
     @dp.message(Command("categories"))
     async def categories(m: Message) -> None:
@@ -246,12 +209,9 @@ async def main() -> None:
     async def sync_catalog(m: Message) -> None:
         REQ_TOTAL.labels(command="sync").inc()
         admins = settings.admin_ids_set()
-        uid = m.from_user.id if m.from_user else 0
-        if admins and uid not in admins:
-            await m.answer(
-                f"Недостаточно прав. Ваш ID: {uid}. "
-                "Добавьте его в переменную ADMIN_USER_IDS (через запятую) в .env и перезапустите сервисы."
-            )
+        if admins and m.from_user.id not in admins:
+            uid = m.from_user.id if m.from_user else 0
+            await m.answer(f"Недостаточно прав. Ваш ID: {uid}. Добавьте его в ADMIN_USER_IDS в .env и перезапустите сервисы.")
             return
 
         request_id = str(uuid.uuid4())
@@ -283,21 +243,11 @@ async def main() -> None:
 
     @dp.callback_query(F.data.startswith("nav:"))
     async def nav_cb(q: CallbackQuery) -> None:
-        raw = (q.data or "")
-        parts = raw.split(":")
-        # nav:<id> or nav:<id>:<page>
         try:
-            item_id = int(parts[1])
+            item_id = int((q.data or "").split(":", 1)[1])
         except Exception:
             await q.answer("Некорректная команда")
             return
-
-        page = 0
-        if len(parts) >= 3:
-            try:
-                page = int(parts[2])
-            except Exception:
-                page = 0
 
         try:
             item = await db_mod.fetch_catalog_item(db, item_id)
@@ -309,11 +259,7 @@ async def main() -> None:
             await q.answer("Это не папка")
             return
 
-        text, markup = await render_dir(
-            str(item.get("path") or root_path),
-            page=page,
-            viewer_tg_user_id=q.from_user.id,
-        )
+        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
         if q.message:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()
@@ -345,13 +291,9 @@ async def main() -> None:
     @dp.message(Command("seed"))
     async def seed(m: Message) -> None:
         REQ_TOTAL.labels(command="seed").inc()
-        admins = settings.admin_ids_set()
-        uid = m.from_user.id if m.from_user else 0
-        if admins and uid not in admins:
-            await m.answer(
-                f"Недостаточно прав. Ваш ID: {uid}. "
-                "Добавьте его в переменную ADMIN_USER_IDS (через запятую) в .env и перезапустите сервисы."
-            )
+        if settings.admin_ids_set() and m.from_user.id not in settings.admin_ids_set():
+            uid = m.from_user.id if m.from_user else 0
+            await m.answer(f"Недостаточно прав. Ваш ID: {uid}. Добавьте его в ADMIN_USER_IDS в .env и перезапустите сервисы.")
             return
 
         if getattr(settings, "storage_mode", "yandex") != "local":
