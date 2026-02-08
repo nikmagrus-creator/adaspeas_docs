@@ -55,11 +55,11 @@ services:
       - python
       - -c
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',
-        timeout=2).read()
+        timeout=5).read()
       interval: 10s
       timeout: 3s
       retries: 10
-      start_period: 15s
+      start_period: 30s
     user: ${APP_UID:-1000}:${APP_GID:-1000}
   worker:
     image: ${IMAGE}
@@ -85,11 +85,11 @@ services:
       - python
       - -c
       - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health',
-        timeout=2).read()
+        timeout=5).read()
       interval: 10s
       timeout: 3s
       retries: 10
-      start_period: 15s
+      start_period: 30s
     user: ${APP_UID:-1000}:${APP_GID:-1000}
   caddy:
     image: caddy:2-alpine
@@ -109,7 +109,7 @@ services:
     - caddy_config:/config
     depends_on:
       bot:
-        condition: service_healthy
+        condition: service_started
 volumes:
   tg_api_data: null
   redis_data: null

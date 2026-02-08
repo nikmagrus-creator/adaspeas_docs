@@ -358,3 +358,11 @@
 Что сделано:
 - Bot: /health поднимается сразу при старте процесса, независимо от доступности Telegram.
 - Worker: исправлен notify_user (settings передаётся явно), чтобы не было NameError при обработке ошибок.
+
+### 2026-02-08 23:55 MSK
+Цель: убрать флапающий прод‑деплой из-за ожидания bot=healthy.
+
+Что сделано:
+- `docker-compose.prod.yml`: `caddy` зависит от `bot` по `service_started`, а не по `service_healthy`.
+- Healthcheck `bot/worker`: увеличен таймаут запроса и `start_period`, чтобы не ловить false-negative на старте.
+
