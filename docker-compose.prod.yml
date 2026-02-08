@@ -18,7 +18,7 @@ services:
     - localbotapi
     restart: unless-stopped
     env_file:
-    - .env
+    - ${ENV_FILE:-.env}
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
@@ -39,7 +39,7 @@ services:
     image: ${IMAGE}
     restart: unless-stopped
     env_file:
-    - .env
+    - ${ENV_FILE:-.env}
     volumes:
     - app_data:/data
     depends_on:
@@ -69,7 +69,7 @@ services:
     - -m
     - adaspeas.worker.main
     env_file:
-    - .env
+    - ${ENV_FILE:-.env}
     volumes:
     - app_data:/data
     depends_on:
@@ -95,7 +95,7 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     env_file:
-    - .env
+    - ${ENV_FILE:-.env}
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
       METRICS_USER: ${METRICS_USER}

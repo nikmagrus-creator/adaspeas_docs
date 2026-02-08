@@ -42,7 +42,7 @@ services:
         GID: ${GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.bot.main"]
-    env_file: .env
+    env_file: ${ENV_FILE:-.env}
     volumes:
       - ./data:/data
     depends_on:
@@ -67,7 +67,7 @@ services:
         GID: ${GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.worker.main"]
-    env_file: .env
+    env_file: ${ENV_FILE:-.env}
     volumes:
       - ./data:/data
     depends_on:
