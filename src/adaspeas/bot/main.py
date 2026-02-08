@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+import math
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -62,12 +63,15 @@ async def main() -> None:
             BotCommand(command='start', description='Показать справку'),
             BotCommand(command='id', description='Показать ваш Telegram ID'),
             BotCommand(command='categories', description='Каталог'),
+            BotCommand(command='search', description='Поиск по каталогу'),
             BotCommand(command='request', description='Запросить доступ (если включён контроль доступа)'),
             BotCommand(command='note', description='Добавить примечание о себе (admin видит)'),
             BotCommand(command='users', description='(admin) Пользователи/доступ'),
             BotCommand(command='list', description='Тестовый каталог (SQLite)'),
             BotCommand(command='download', description='Скачать файл по id из /list'),
-            BotCommand(command='sync', description='(admin) Синхронизировать каталог')
+            BotCommand(command='sync', description='(admin) Синхронизировать каталог'),
+            BotCommand(command='audit', description='(admin) Аудит загрузок'),
+            BotCommand(command='stats', description='(admin) Статистика')
         ])
     except Exception:
         # Never fail bot startup because of Telegram UI cosmetics
@@ -209,14 +213,48 @@ async def main() -> None:
         parent_path=None,
     )
 
-    async def render_dir(path: str, *, viewer_tg_user_id: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
-        children = await db_mod.fetch_children(db, path, limit=60)
+    async def render_dir(
+        path: str,
+        *,
+        viewer_tg_user_id: int | None = None,
+        offset: int = 0,
+    ) -> tuple[str, InlineKeyboardMarkup]:
+        page_size = int(getattr(settings, "catalog_page_size", 30) or 30)
+        offset = max(0, int(offset))
+
+        # Defensive: ensure current folder exists and has an id (needed for pagination callbacks).
+        cur_item = await db_mod.fetch_catalog_item_by_path(db, path)
+        if cur_item is None:
+            await db_mod.upsert_catalog_item(
+                db,
+                path=path,
+                kind="folder",
+                title=title_of(path),
+                yandex_id=path,
+                parent_path=parent_of(path),
+            )
+            cur_item = await db_mod.fetch_catalog_item_by_path(db, path)
+
+        cur_id = int(cur_item["id"]) if cur_item else None
+
+        total = await db_mod.count_children(db, path)
+        children = await db_mod.fetch_children(db, path, limit=page_size, offset=offset)
+
         kb: list[list[InlineKeyboardButton]] = []
         for ch in children:
             is_folder = ch.get("kind") == "folder"
-            cb = f"nav:{ch['id']}" if is_folder else f"dl:{ch['id']}"
+            cb = f"nav:{ch['id']}:0" if is_folder else f"dl:{ch['id']}"
             label = ("📁 " if is_folder else "📄 ") + str(ch.get("title") or "")
             kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
+
+        # Page controls
+        if cur_id is not None and (offset > 0 or (offset + page_size) < total):
+            row: list[InlineKeyboardButton] = []
+            if offset > 0:
+                row.append(InlineKeyboardButton(text="⬅️", callback_data=f"nav:{cur_id}:{max(0, offset - page_size)}"))
+            if (offset + page_size) < total:
+                row.append(InlineKeyboardButton(text="➡️", callback_data=f"nav:{cur_id}:{offset + page_size}"))
+            kb.append(row)
 
         # Nav controls
         back = parent_of(path)
@@ -233,7 +271,7 @@ async def main() -> None:
                 )
                 parent_item = await db_mod.fetch_catalog_item_by_path(db, back)
             if parent_item is not None:
-                kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"nav:{parent_item['id']}")])
+                kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"nav:{parent_item['id']}:0")])
 
         # Root shortcut
         if path != root_path:
@@ -249,19 +287,26 @@ async def main() -> None:
                 )
                 root_item = await db_mod.fetch_catalog_item_by_path(db, root_path)
             if root_item is not None:
-                kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}")])
+                kb.append([InlineKeyboardButton(text="🏠 В корень", callback_data=f"nav:{root_item['id']}:0")])
 
         text = f"{title_of(path)}"
         last_sync = await db_mod.get_meta(db, 'catalog_last_sync_at')
         if last_sync:
             text += f"\n\nОбновлено: {last_sync}"
+
+        if total > 0:
+            page = (offset // page_size) + 1
+            pages = max(1, math.ceil(total / page_size))
+            text += f"\n\nСтраница {page}/{pages} (элементов: {total})"
+            text += "\nПоиск: /search <текст>"
+
         admins = settings.admin_ids_set()
         is_admin = bool(viewer_tg_user_id and admins and viewer_tg_user_id in admins)
         # Admins can see the underlying path for debugging.
         if is_admin:
             text += f"\n\n(путь: {path})"
 
-        if not children:
+        if total == 0:
             if is_admin:
                 text += "\n\nКаталог пока пуст. Запусти /sync, чтобы worker наполнил SQLite."
             else:
@@ -269,18 +314,88 @@ async def main() -> None:
 
         return text, InlineKeyboardMarkup(inline_keyboard=kb)
 
+    async def render_search(
+        token: str,
+        *,
+        viewer_tg_user_id: int,
+        offset: int = 0,
+    ) -> tuple[str, InlineKeyboardMarkup]:
+        ttl_sec = int(getattr(settings, "search_session_ttl_sec", 3600) or 3600)
+        page_size = int(getattr(settings, "search_page_size", 20) or 20)
+        offset = max(0, int(offset))
+
+        sess = await db_mod.fetch_search_session(db, token)
+        if not sess:
+            return "Поиск устарел. Запусти /search ещё раз.", InlineKeyboardMarkup(inline_keyboard=[])
+
+        # Enforce ownership (or allow admin).
+        admins = settings.admin_ids_set()
+        if int(sess.get("tg_user_id") or 0) != int(viewer_tg_user_id) and not (admins and viewer_tg_user_id in admins):
+            return "Поиск недоступен.", InlineKeyboardMarkup(inline_keyboard=[])
+
+        # Best-effort cleanup of old sessions
+        try:
+            await db_mod.cleanup_search_sessions(db, ttl_sec)
+        except Exception:
+            pass
+
+        query = str(sess.get("query") or "").strip()
+        scope_path = str(sess.get("scope_path") or root_path)
+
+        items, has_more = await db_mod.search_catalog_items(
+            db,
+            query=query,
+            scope_path=scope_path,
+            limit=page_size,
+            offset=offset,
+        )
+
+        kb: list[list[InlineKeyboardButton]] = []
+        for it in items:
+            is_folder = it.get("kind") == "folder"
+            cb = f"nav:{it['id']}:0" if is_folder else f"dl:{it['id']}"
+            label = ("📁 " if is_folder else "📄 ") + str(it.get("title") or "")
+            kb.append([InlineKeyboardButton(text=label[:64], callback_data=cb)])
+
+        # pagination
+        nav_row: list[InlineKeyboardButton] = []
+        if offset > 0:
+            nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"s:{token}:{max(0, offset - page_size)}"))
+        if has_more:
+            nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"s:{token}:{offset + page_size}"))
+        if nav_row:
+            kb.append(nav_row)
+
+        text = f"Результаты: {query}"
+        if not items:
+            text += "\n\nНичего не найдено."
+        else:
+            text += f"\nПоказаны {offset + 1}..{offset + len(items)}"
+
+        return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+
     @dp.message(Command("start"))
     async def start(m: Message) -> None:
         REQ_TOTAL.labels(command="start").inc()
         await db_mod.upsert_user(db, m.from_user.id)
         await m.answer(
-            "Привет. Это Adaspeas MVP.\n\n"
+            "Привет. Это Adaspeas.\n\n"
             "Команды:\n"
-            "/categories - показать каталог\n"
-            "/seed - (admin) добавить тестовый файл в каталог (локальный режим)\n"
-            "/sync - (admin) синхронизировать каталог в фоне (worker)\n"
-            "/list - показать тестовый каталог\n"
-            "/download <id> - поставить задачу на отправку файла"
+            "/categories - каталог\n"
+            "/search <текст> - поиск по каталогу\n"
+            "/id - показать ваш Telegram ID\n"
+            "/note <текст> - добавить примечание о себе (админ видит)\n"
+            "/request - запросить доступ (если включён контроль доступа)\n\n"
+            "Админ:\n"
+            "/users - управление доступом\n"
+            "/sync - синхронизация каталога (worker)\n"
+            "/audit - аудит загрузок\n"
+            "/stats - статистика\n"
+            "/seed - (local) добавить демо файл\n\n"
+            "Debug:\n"
+            "/list, /download <id>\n"
         )
 
 
@@ -475,8 +590,29 @@ async def main() -> None:
         if m.from_user and not await ensure_active(int(m.from_user.id), reply_chat_id=m.chat.id, reply_cb=m.answer):
             return
         # Inline navigation UI (no long callback_data, only numeric ids).
-        text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None)
+        text, markup = await render_dir(root_path, viewer_tg_user_id=m.from_user.id if m.from_user else None, offset=0)
         await m.answer(text, reply_markup=markup)
+
+    @dp.message(Command("search"))
+    async def search_cmd(m: Message) -> None:
+        REQ_TOTAL.labels(command="search").inc()
+        if not m.from_user:
+            await m.answer("Не удалось определить ваш Telegram ID.")
+            return
+        if not await ensure_active(int(m.from_user.id), reply_chat_id=m.chat.id, reply_cb=m.answer):
+            return
+
+        parts = (m.text or "").split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            await m.answer("Использование: /search <текст>")
+            return
+        query = parts[1].strip()
+
+        token = await db_mod.create_search_session(db, tg_user_id=int(m.from_user.id), query=query, scope_path=root_path, ttl_sec=int(getattr(settings, "search_session_ttl_sec", 3600) or 3600))
+        text, markup = await render_search(token, viewer_tg_user_id=int(m.from_user.id), offset=0)
+        await m.answer(text, reply_markup=markup)
+
+
 
     @dp.message(Command("sync"))
     async def sync_catalog(m: Message) -> None:
@@ -551,6 +687,42 @@ async def main() -> None:
             return
 
         text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
+        if q.message:
+            await q.message.edit_text(text, reply_markup=markup)
+        await q.answer()
+
+    
+
+    @dp.callback_query(F.data.startswith("s:"))
+    async def search_cb(q: CallbackQuery) -> None:
+        parts = (q.data or "").split(":")
+        if len(parts) != 3:
+            await q.answer()
+            return
+        _tag, token, offset_s = parts
+        try:
+            offset = int(offset_s)
+        except Exception:
+            offset = 0
+
+        async def _reply(text: str) -> None:
+            try:
+                if q.message:
+                    await q.message.answer(text)
+                else:
+                    await bot.send_message(chat_id=q.from_user.id, text=text)
+            except Exception:
+                pass
+
+        if not await ensure_active(
+            int(q.from_user.id),
+            reply_chat_id=(q.message.chat.id if q.message else q.from_user.id),
+            reply_cb=_reply,
+        ):
+            await q.answer()
+            return
+
+        text, markup = await render_search(token, viewer_tg_user_id=int(q.from_user.id), offset=offset)
         if q.message:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()

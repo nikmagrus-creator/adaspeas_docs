@@ -53,6 +53,19 @@ async def test_schema_version_and_required_columns():
         for required in {"created_at", "job_id", "tg_chat_id", "tg_user_id", "catalog_item_id", "result", "mode", "bytes", "error"}:
             assert required in cols
 
+        # catalog search (IDEA-007): search sessions table
+        cur = await db.execute("PRAGMA table_info(search_sessions)")
+        cols = {r[1] for r in await cur.fetchall()}
+        for required in {"token", "created_at", "tg_user_id", "scope_path", "query"}:
+            assert required in cols
+
+        # FTS5 table may appear as virtual table; just ensure it exists in sqlite_master
+        cur = await db.execute("SELECT name FROM sqlite_master WHERE type IN ('table','virtual table') AND name='catalog_items_fts'")
+        row = await cur.fetchone()
+        assert row and row[0] == "catalog_items_fts"
+
+
+
         await db.close()
 
 

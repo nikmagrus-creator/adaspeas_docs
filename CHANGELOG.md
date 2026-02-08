@@ -5,6 +5,8 @@
 ## [Unreleased]
 - feat: уведомления пользователю и админам при финальной ошибке доставки/синка; access-control проверка в callback-ах
 - docs: усилена политика "только main" (шаблон применения паков с optional docker/pytest, инструкция чистки лишних веток origin/локально)
+- feat: /search — поиск по каталогу (FTS5 + search_sessions, лимит callback_data 64 байта)
+- fix: worker — ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter)
 
 ### Added
 - feat: аудит скачиваний (таблица download_audit) + админ-команды /audit и /stats

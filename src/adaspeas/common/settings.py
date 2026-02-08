@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # Safety cap for nodes visited per sync (prevents endless trees / huge repos).
     catalog_sync_max_nodes: int = 5000
 
+    # Search (IDEA-007)
+    search_page_size: int = 20
+    search_session_ttl_sec: int = 3600
+
+    # Network retries/backoff (IDEA-004)
+    net_retry_attempts: int = 3
+    net_retry_max_sec: int = 30
+
+
     # Queue
     redis_url: str = "redis://redis:6379/0"
 

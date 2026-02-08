@@ -8,11 +8,15 @@ import uuid
 
 from aiohttp import web
 from aiogram import Bot
+from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramServerError
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import FSInputFile
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import structlog
+
+from tenacity import AsyncRetrying, stop_after_attempt, wait_random_exponential, retry_if_exception_type
+import httpx
 
 from adaspeas.common.logging import setup_logging
 from adaspeas.common.settings import Settings
@@ -21,6 +25,28 @@ from adaspeas.common.queue import get_redis, enqueue, dequeue
 from adaspeas.storage import StorageClient, make_storage_client
 
 log = structlog.get_logger()
+
+# --- Network retry/backoff (IDEA-004) ---
+_RETRIABLE_SEND = (TelegramRetryAfter, TelegramNetworkError, TelegramServerError, httpx.HTTPError, asyncio.TimeoutError, ConnectionError)
+
+async def _call_with_retry(coro_factory, *, attempts: int, max_wait_sec: int) -> object:
+    # Retry external I/O with exponential jitter. For Telegram flood control respect retry_after.
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(max(1, int(attempts))),
+        wait=wait_random_exponential(multiplier=1, max=max(1, int(max_wait_sec))),
+        retry=retry_if_exception_type(_RETRIABLE_SEND),
+        reraise=True,
+    ):
+        with attempt:
+            try:
+                return await coro_factory()
+            except TelegramRetryAfter as e:
+                # aiogram exposes retry_after seconds
+                ra = int(getattr(e, "retry_after", 0) or 0)
+                await asyncio.sleep(max(1, ra))
+                raise
+
+
 
 JOBS_RUNNING = Gauge("jobs_running", "Number of jobs running")
 JOBS_SUCCEEDED = Counter("jobs_succeeded_total", "Jobs succeeded")
@@ -39,14 +65,14 @@ async def notify_admins(bot: Bot, settings: Settings, text: str) -> None:
         targets.extend(sorted(list(admins)))
     for t in targets:
         try:
-            await bot.send_message(chat_id=int(t), text=text)
+            await _call_with_retry(lambda: bot.send_message(chat_id=int(t), text=text), attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3), max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30))
         except Exception:
             continue
 
 
 async def notify_user(bot: Bot, chat_id: int, text: str) -> None:
     try:
-        await bot.send_message(chat_id=int(chat_id), text=text)
+        await _call_with_retry(lambda: bot.send_message(chat_id=int(chat_id), text=text), attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3), max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30))
     except Exception:
         pass
 
@@ -103,7 +129,7 @@ async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path
             continue
         seen.add(cur_path)
 
-        items = await storage.list_dir(cur_path)
+        items = await _call_with_retry(lambda: storage.list_dir(cur_path), attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3), max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30))
         for it in items:
             typ = str(it.get('type') or '').strip().lower()
             kind = 'folder' if typ == 'dir' else 'file'

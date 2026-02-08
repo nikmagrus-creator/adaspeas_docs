@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import aiosqlite
+import re
+import uuid
+
 
 # NOTE: Use incremental schema versions. Do NOT edit older schema blocks in-place.
 SCHEMA_V1 = """
@@ -129,9 +132,48 @@ CREATE INDEX IF NOT EXISTS idx_download_audit_item_created ON download_audit(cat
 CREATE INDEX IF NOT EXISTS idx_jobs_type_created ON jobs(job_type, created_at);
 """
 
+# v8: catalog search (IDEA-007): full-text search index for title/path (FTS5, external content).
+MIGRATION_V8 = """
+CREATE VIRTUAL TABLE IF NOT EXISTS catalog_items_fts USING fts5(
+  title,
+  path,
+  content='catalog_items',
+  content_rowid='id'
+);
+
+-- Keep FTS index consistent with catalog_items.
+CREATE TRIGGER IF NOT EXISTS catalog_items_fts_ai AFTER INSERT ON catalog_items BEGIN
+  INSERT INTO catalog_items_fts(rowid, title, path) VALUES (new.id, new.title, new.path);
+END;
+CREATE TRIGGER IF NOT EXISTS catalog_items_fts_ad AFTER DELETE ON catalog_items BEGIN
+  INSERT INTO catalog_items_fts(catalog_items_fts, rowid, title, path) VALUES('delete', old.id, old.title, old.path);
+END;
+CREATE TRIGGER IF NOT EXISTS catalog_items_fts_au AFTER UPDATE ON catalog_items BEGIN
+  INSERT INTO catalog_items_fts(catalog_items_fts, rowid, title, path) VALUES('delete', old.id, old.title, old.path);
+  INSERT INTO catalog_items_fts(rowid, title, path) VALUES (new.id, new.title, new.path);
+END;
+
+-- Ensure index is populated / consistent for existing rows.
+INSERT INTO catalog_items_fts(catalog_items_fts) VALUES('rebuild');
+"""
+
+# v9: catalog search sessions to keep callback_data small (Telegram limit is 64 bytes).
+MIGRATION_V9 = """
+CREATE TABLE IF NOT EXISTS search_sessions (
+  token TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  tg_user_id INTEGER NOT NULL,
+  scope_path TEXT NOT NULL,
+  query TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_sessions_user_created ON search_sessions(tg_user_id, created_at);
+"""
 
 
-TARGET_SCHEMA_VERSION = 7
+
+
+TARGET_SCHEMA_VERSION = 9
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
@@ -139,6 +181,8 @@ MIGRATIONS: dict[int, str] = {
     5: MIGRATION_V5,
     6: MIGRATION_V6,
     7: MIGRATION_V7,
+    8: MIGRATION_V8,
+    9: MIGRATION_V9,
 }
 
 
@@ -562,6 +606,135 @@ async def count_children(db: aiosqlite.Connection, parent_path: str | None) -> i
     )
     row = await cur.fetchone()
     return int(row[0] or 0)
+
+
+
+# --- Catalog search (IDEA-007) ---
+
+def _fts_query_from_user(q: str) -> str:
+    tokens = re.findall(r"[0-9A-Za-zА-Яа-яЁё]+", (q or "").strip())
+    tokens = [t for t in tokens if t][:8]
+    if not tokens:
+        return ""
+    return " AND ".join([f"{t}*" for t in tokens])
+
+
+def _like_escape(q: str) -> str:
+    return (q or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _scope_like(scope_path: str) -> str:
+    p = (scope_path or "/").rstrip("/") or "/"
+    if p == "/":
+        return "/%"
+    return p + "/%"
+
+
+async def cleanup_search_sessions(db: aiosqlite.Connection, ttl_sec: int) -> None:
+    if ttl_sec <= 0:
+        return
+    await db.execute(
+        "DELETE FROM search_sessions WHERE created_at < datetime('now', ?)",
+        (f"-{int(ttl_sec)} seconds",),
+    )
+    await db.commit()
+
+
+async def create_search_session(
+    db: aiosqlite.Connection,
+    *,
+    tg_user_id: int,
+    query: str,
+    scope_path: str,
+    ttl_sec: int = 3600,
+) -> str:
+    await cleanup_search_sessions(db, ttl_sec)
+    token = str(uuid.uuid4())
+    await db.execute(
+        "INSERT INTO search_sessions(token, tg_user_id, scope_path, query) VALUES (?,?,?,?)",
+        (token, int(tg_user_id), (scope_path or "/"), (query or "").strip()),
+    )
+    await db.commit()
+    return token
+
+
+async def fetch_search_session(db: aiosqlite.Connection, token: str) -> dict | None:
+    cur = await db.execute(
+        "SELECT token, created_at, tg_user_id, scope_path, query FROM search_sessions WHERE token=?",
+        (token,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    return {
+        "token": str(row[0]),
+        "created_at": row[1],
+        "tg_user_id": int(row[2]),
+        "scope_path": str(row[3]),
+        "query": str(row[4]),
+    }
+
+
+async def search_catalog_items(
+    db: aiosqlite.Connection,
+    *,
+    query: str,
+    scope_path: str,
+    limit: int = 25,
+    offset: int = 0,
+) -> tuple[list[dict], bool]:
+    q = (query or "").strip()
+    if not q:
+        return [], False
+
+    scope_like = _scope_like(scope_path)
+    limit = max(1, int(limit))
+    offset = max(0, int(offset))
+    limit_plus = limit + 1
+
+    fts_q = _fts_query_from_user(q)
+    if fts_q:
+        try:
+            cur = await db.execute(
+                """
+                SELECT c.id, c.kind, c.title, c.size_bytes, c.path
+                FROM catalog_items_fts f
+                JOIN catalog_items c ON c.id = f.rowid
+                WHERE f MATCH ?
+                  AND c.is_deleted=0
+                  AND c.path LIKE ?
+                ORDER BY bm25(f), c.kind DESC, c.title ASC
+                LIMIT ? OFFSET ?
+                """,
+                (fts_q, scope_like, int(limit_plus), int(offset)),
+            )
+            rows = await cur.fetchall()
+            items = [
+                {"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3], "path": r[4]}
+                for r in rows
+            ]
+            has_more = len(items) > limit
+            return items[:limit], has_more
+        except Exception:
+            pass
+
+    like = f"%{_like_escape(q)}%"
+    cur = await db.execute(
+        """
+        SELECT id, kind, title, size_bytes, path
+        FROM catalog_items
+        WHERE is_deleted=0
+          AND path LIKE ?
+          AND title LIKE ? ESCAPE '\\'
+        ORDER BY kind DESC, title ASC
+        LIMIT ? OFFSET ?
+        """,
+        (scope_like, like, int(limit_plus), int(offset)),
+    )
+    rows = await cur.fetchall()
+    items = [{"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3], "path": r[4]} for r in rows]
+    has_more = len(items) > limit
+    return items[:limit], has_more
 
 
 async def db_now(db: aiosqlite.Connection) -> str:

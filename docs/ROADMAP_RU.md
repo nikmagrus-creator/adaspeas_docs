@@ -64,8 +64,8 @@
 | IDEA-001 | Inline‑навигация каталога | done | Milestone 1 | UX ядро |
 | IDEA-002 | Фоновая синхронизация каталога | done | Milestone 1 | /sync + scheduler `CATALOG_SYNC_INTERVAL_SEC` |
 | IDEA-003 | Пагинация в каталоге | done | Milestone 1 | `CATALOG_PAGE_SIZE` |
-| IDEA-007 | Поиск в каталоге | idea | Backlog | После M1 |
-| IDEA-004 | Backoff/ретраи для Telegram/Yandex | idea | Backlog | Для устойчивости |
+| IDEA-007 | Поиск в каталоге | done | Backlog | /search, FTS5 + search_sessions |
+| IDEA-004 | Backoff/ретраи для Telegram/Yandex | done | Backlog | Tenacity, уважение RetryAfter |
 | IDEA-005 | Авто‑включение `localbotapi` на прод‑деплое | done | deploy.yml | По флагу USE_LOCAL_BOT_API |
 | IDEA-006 | CI guard: изменения кода требуют CHANGELOG/CHATLOG | done | deploy.yml | Чтобы не “забывать” след |
 
