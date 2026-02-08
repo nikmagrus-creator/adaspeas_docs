@@ -18,4 +18,7 @@ async def test_schema_init_and_user_upsert():
         uid = await db_mod.upsert_user(db, 123)
         uid2 = await db_mod.upsert_user(db, 123)
         assert uid == uid2
+        u = await db_mod.fetch_user_by_tg_user_id(db, 123)
+        assert u and u['status'] in {'guest','pending','active','expired','blocked'}
         await db.close()
+

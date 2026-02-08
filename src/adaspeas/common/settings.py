@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     bot_token: str
     admin_user_ids: str = ""
 
+    # Access control (Milestone 2)
+    access_control_enabled: int = 0  # 1 = enforce user status/expiry, 0 = allow everyone
+    default_user_ttl_days: int = 30
+    access_warn_before_sec: int = 86400  # 24h
+    access_warn_check_interval_sec: int = 3600
+    admin_notify_chat_id: int = 0  # optional: отдельный чат/топик для уведомлений админам
+
     # Storage
     storage_mode: str = "yandex"  # yandex | local
     yandex_oauth_token: str = ""

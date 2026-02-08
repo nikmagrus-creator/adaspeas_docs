@@ -93,12 +93,24 @@ ALTER TABLE catalog_items ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_catalog_deleted_parent ON catalog_items(is_deleted, parent_path);
 """
 
-TARGET_SCHEMA_VERSION = 5
+# v6: access control (Milestone 2): user statuses, notes, expiry and 24h warning marker.
+MIGRATION_V6 = """
+ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'guest';
+ALTER TABLE users ADD COLUMN user_note TEXT;
+ALTER TABLE users ADD COLUMN expires_at TEXT;
+ALTER TABLE users ADD COLUMN warned_24h_at TEXT;
+ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'));
+CREATE INDEX IF NOT EXISTS idx_users_status_expires ON users(status, expires_at);
+"""
+
+
+TARGET_SCHEMA_VERSION = 6
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
     4: MIGRATION_V4,
     5: MIGRATION_V5,
+    6: MIGRATION_V6,
 }
 
 
@@ -153,6 +165,159 @@ async def upsert_user(db: aiosqlite.Connection, tg_user_id: int) -> int:
     row = await cur.fetchone()
     return int(row[0])
 
+
+
+# --- Access control (Milestone 2) ---
+
+USER_STATUSES = {"guest", "pending", "active", "expired", "blocked"}
+
+
+def _now_sqlite_utc() -> str:
+    # Keep the same sortable format SQLite uses for datetime('now').
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def fetch_user_by_tg_user_id(db: aiosqlite.Connection, tg_user_id: int) -> dict | None:
+    cur = await db.execute(
+        "SELECT id, tg_user_id, created_at, status, user_note, expires_at, warned_24h_at, updated_at FROM users WHERE tg_user_id=?",
+        (tg_user_id,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": int(row[0]),
+        "tg_user_id": int(row[1]),
+        "created_at": row[2],
+        "status": row[3] or "guest",
+        "user_note": row[4],
+        "expires_at": row[5],
+        "warned_24h_at": row[6],
+        "updated_at": row[7],
+    }
+
+
+async def set_user_note(db: aiosqlite.Connection, tg_user_id: int, note: str) -> None:
+    await db.execute(
+        "UPDATE users SET user_note=?, updated_at=datetime('now') WHERE tg_user_id=?",
+        (note, tg_user_id),
+    )
+    await db.commit()
+
+
+async def set_user_status(
+    db: aiosqlite.Connection,
+    tg_user_id: int,
+    status: str,
+    *,
+    expires_at: str | None = None,
+) -> None:
+    status = (status or "").strip().lower()
+    if status not in USER_STATUSES:
+        raise ValueError(f"Unknown user status: {status}")
+    await db.execute(
+        "UPDATE users SET status=?, expires_at=?, warned_24h_at=NULL, updated_at=datetime('now') WHERE tg_user_id=?",
+        (status, expires_at, tg_user_id),
+    )
+    await db.commit()
+
+
+async def activate_user(db: aiosqlite.Connection, tg_user_id: int, ttl_days: int) -> None:
+    ttl_days = int(ttl_days)
+    if ttl_days <= 0:
+        ttl_days = 1
+    # Store expiry in SQLite-friendly format (UTC).
+    from datetime import datetime, timedelta, timezone
+    expires = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=ttl_days)
+    expires_at = expires.strftime("%Y-%m-%d %H:%M:%S")
+    await set_user_status(db, tg_user_id, "active", expires_at=expires_at)
+
+
+async def extend_user(db: aiosqlite.Connection, tg_user_id: int, add_days: int) -> None:
+    add_days = int(add_days)
+    if add_days <= 0:
+        add_days = 1
+    u = await fetch_user_by_tg_user_id(db, tg_user_id)
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    if not u or not u.get("expires_at"):
+        base = now
+    else:
+        try:
+            base = datetime.strptime(str(u["expires_at"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            base = now
+        if base < now:
+            base = now
+    expires = base + timedelta(days=add_days)
+    expires_at = expires.strftime("%Y-%m-%d %H:%M:%S")
+    await set_user_status(db, tg_user_id, "active", expires_at=expires_at)
+
+
+async def list_users(db: aiosqlite.Connection, limit: int = 200, offset: int = 0) -> list[dict]:
+    cur = await db.execute(
+        "SELECT tg_user_id, created_at, status, user_note, expires_at, warned_24h_at, updated_at FROM users ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+        (int(limit), int(offset)),
+    )
+    rows = await cur.fetchall()
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "tg_user_id": int(r[0]),
+                "created_at": r[1],
+                "status": r[2] or "guest",
+                "user_note": r[3],
+                "expires_at": r[4],
+                "warned_24h_at": r[5],
+                "updated_at": r[6],
+            }
+        )
+    return out
+
+
+async def expire_users(db: aiosqlite.Connection) -> int:
+    # Mark active users with past expiry as expired.
+    cur = await db.execute(
+        "UPDATE users SET status='expired', updated_at=datetime('now') WHERE status='active' AND expires_at IS NOT NULL AND expires_at <= datetime('now')"
+    )
+    await db.commit()
+    return int(cur.rowcount or 0)
+
+
+async def fetch_users_expiring_within(db: aiosqlite.Connection, warn_before_sec: int) -> list[dict]:
+    warn_before_sec = int(warn_before_sec)
+    if warn_before_sec <= 0:
+        warn_before_sec = 86400
+    # SQLite does not accept parameterized modifiers, so build a safe string.
+    minutes = max(1, int(warn_before_sec // 60))
+    boundary_expr = f"datetime('now', '+{minutes} minutes')"
+    cur = await db.execute(
+        f"""
+        SELECT tg_user_id, status, user_note, expires_at
+        FROM users
+        WHERE status='active'
+          AND expires_at IS NOT NULL
+          AND expires_at <= {boundary_expr}
+          AND (warned_24h_at IS NULL)
+        ORDER BY expires_at ASC
+        LIMIT 200
+        """
+    )
+    rows = await cur.fetchall()
+    out=[]
+    for r in rows:
+        out.append({"tg_user_id": int(r[0]), "status": r[1], "user_note": r[2], "expires_at": r[3]})
+    return out
+
+
+async def mark_user_warned_24h(db: aiosqlite.Connection, tg_user_id: int) -> None:
+    await db.execute(
+        "UPDATE users SET warned_24h_at=datetime('now'), updated_at=datetime('now') WHERE tg_user_id=?",
+        (tg_user_id,),
+    )
+    await db.commit()
 
 async def insert_job(
     db: aiosqlite.Connection,

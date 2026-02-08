@@ -11,7 +11,7 @@ from adaspeas.common.settings import Settings
 
 
 @pytest.mark.asyncio
-async def test_schema_is_v5_and_has_required_columns():
+async def test_schema_is_v6_and_has_required_columns():
     with tempfile.NamedTemporaryFile(suffix=".sqlite") as tmp:
         db = await db_mod.connect(tmp.name)
         await db_mod.ensure_schema(db)
@@ -21,7 +21,13 @@ async def test_schema_is_v5_and_has_required_columns():
         row = await cur.fetchone()
         assert row and int(row[0]) == getattr(db_mod, "TARGET_SCHEMA_VERSION")
 
-        # catalog_items columns
+                # users columns (access control)
+        cur = await db.execute("PRAGMA table_info(users)")
+        cols = {r[1] for r in await cur.fetchall()}
+        for required in {"tg_user_id", "status", "user_note", "expires_at", "warned_24h_at", "updated_at"}:
+            assert required in cols
+
+# catalog_items columns
         cur = await db.execute("PRAGMA table_info(catalog_items)")
         cols = {r[1] for r in await cur.fetchall()}  # name is column 1
         for required in {"path", "kind", "title", "parent_path", "seen_at", "is_deleted", "tg_file_id", "tg_file_unique_id"}:
@@ -93,3 +99,8 @@ def test_settings_has_catalog_fields():
     assert hasattr(s, "catalog_page_size")
     assert hasattr(s, "catalog_sync_interval_sec")
     assert hasattr(s, "catalog_sync_max_nodes")
+    assert hasattr(s, "access_control_enabled")
+    assert hasattr(s, "default_user_ttl_days")
+    assert hasattr(s, "access_warn_before_sec")
+    assert hasattr(s, "access_warn_check_interval_sec")
+
