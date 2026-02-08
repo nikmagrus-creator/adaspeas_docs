@@ -151,7 +151,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Проверка: не хранить __pycache__/ и .pyc в репозитории
+      - name: "Проверка: не хранить __pycache__/ и .pyc в репозитории"
         run: |
           set -e
           if git ls-files | grep -E '(^|/)(__pycache__/|.*\.pyc$)' >/dev/null; then
