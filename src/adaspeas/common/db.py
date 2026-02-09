@@ -257,16 +257,27 @@ async def get_schema_version(db: aiosqlite.Connection) -> int:
 
 
 async def _executescript_tolerant(db: aiosqlite.Connection, script: str) -> None:
-    # Run statements one-by-one so we can ignore specific idempotency errors
-    # (e.g., older prod DBs with schema drift where a column already exists).
-    stmts = []
-    for chunk in script.split(";"):
-        stmt = chunk.strip()
-        if not stmt:
-            continue
-        stmts.append(stmt)
+    """Execute SQL script statement-by-statement, tolerating safe idempotency errors.
 
-    for stmt in stmts:
+    Important: naive splitting by ';' breaks compound statements (e.g. CREATE TRIGGER
+    ... BEGIN ...; ...; END;), producing sqlite3.OperationalError: incomplete input.
+
+    We instead accumulate text until sqlite3.complete_statement() says we have a
+    full statement.
+    """
+
+    buf: list[str] = []
+    for line in script.splitlines(True):
+        buf.append(line)
+        candidate = "".join(buf).strip()
+        if not candidate:
+            buf.clear()
+            continue
+        if not sqlite3.complete_statement(candidate):
+            continue
+
+        stmt = candidate
+        buf.clear()
         try:
             await db.execute(stmt)
         except sqlite3.OperationalError as e:
@@ -274,6 +285,17 @@ async def _executescript_tolerant(db: aiosqlite.Connection, script: str) -> None
             # tolerate schema drift (e.g., out-of-band added columns or re-run migrations)
             if ("duplicate column name" in msg) or ("already exists" in msg):
                 continue
+            raise
+
+    tail = "".join(buf).strip()
+    if tail:
+        # If the script has a trailing statement without ';', try to execute it.
+        try:
+            await db.execute(tail)
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if ("duplicate column name" in msg) or ("already exists" in msg):
+                return
             raise
 
 

@@ -38,6 +38,7 @@
 
 ### Fixed
 - ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data)
+- db: исправлён регресс в миграциях SQLite: исполнение SQL-скриптов больше не режет `CREATE TRIGGER ... BEGIN ... END;` по `;` (устраняет `sqlite3.OperationalError: incomplete input`)
 - ops: в docker-compose.yml добавлен init-app-data для первого запуска (Docker может создать ./data как root:root)
 - docs: уточнены правила запуска на VPS (использовать docker-compose.prod.yml / systemd unit)
 - fix: /categories — реально применена настройка CATALOG_PAGE_SIZE и добавлены кнопки страниц (callback_data: nav:<id>:<offset>)

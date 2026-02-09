@@ -366,5 +366,6 @@
 
 - Bot: исправлен разбор callback_data `nav:<id>:<offset>` (раньше падало на `int("id:0")`), добавлена передача offset в render_dir.
 - DB: fallback поиска (LIKE) теперь ищет по title и path, добавлен тест на случай отсутствия FTS.
+- DB: исправлен регресс в применении миграций: разбор SQL-скриптов больше не режет составные конструкции (например, `CREATE TRIGGER ... BEGIN ... END;`) и не вызывает `sqlite3.OperationalError: incomplete input`.
 Следующие шаги:
 - Перепроверить деплой на VPS (после pull) что worker становится `healthy`, и миграции больше не падают.
