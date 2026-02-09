@@ -271,37 +271,19 @@ async def _executescript_tolerant(db: aiosqlite.Connection, script: str) -> None
             await db.execute(stmt)
         except sqlite3.OperationalError as e:
             msg = str(e).lower()
-            if "duplicate column name" in msg:
+            # tolerate schema drift (e.g., out-of-band added columns or re-run migrations)
+            if ("duplicate column name" in msg) or ("already exists" in msg):
                 continue
             raise
 
 
 async def _executescript_idempotent(db: aiosqlite.Connection, script: str) -> None:
-    """Execute a migration script in a way that tolerates *benign* schema drift.
+    """Execute a migration script in an idempotent way.
 
-    We primarily need this for old prod DBs where some additive columns were created out-of-band,
-    and `ALTER TABLE ... ADD COLUMN ...` would otherwise crash the whole app with
-    sqlite3.OperationalError: duplicate column name.
-
-    Important: some migrations contain triggers / FTS blocks (with inner semicolons), so for those
-    we must use executescript() and not naive statement splitting.
+    We keep migrations readable (plain SQL), but apply them statement-by-statement
+    and ignore safe duplicates (mainly: duplicate columns / already-exists).
     """
-
-    upper = script.upper()
-    if "CREATE TRIGGER" in upper or "VIRTUAL TABLE" in upper:
-        await db.executescript(script)
-        return
-
-    try:
-        await db.executescript(script)
-    except sqlite3.OperationalError as e:
-        msg = str(e).lower()
-        if "duplicate column name" in msg:
-            # Fall back to statement-by-statement execution, skipping duplicate-column statements,
-            # so the rest of the migration can still apply.
-            await _executescript_tolerant(db, script)
-            return
-        raise
+    await _executescript_tolerant(db, script)
 
 
 async def count_rows(db: aiosqlite.Connection, table: str) -> int:

@@ -16,6 +16,7 @@
   - Если GitHub недоступен и нужен "полный архив" для контекста в чате: делай снимок tracked‑файлов через `git archive` (zip без `.git/`).
 - После выдачи pack ассистент **обязан** сразу дать **один** готовый блок команд `apply → commit → push`
   (шаблон: `docs/PACK_APPLY_TEMPLATE_RU.md`, с подставленным именем файла).
+- Шаблон `docs/PACK_APPLY_TEMPLATE_RU.md` включает перевод `origin` на SSH (если был HTTPS), чтобы `git push` не спрашивал логин/пароль.
 - Работаем **только** в `main` и держим линейную историю (без merge/cherry-pick/rebase).
 - Сообщения коммитов: **только по-русски** (`<тип>: <кратко>`).
 - Пакеты распаковываем **только локально**. На VPS только `git pull --ff-only` из `main`.
@@ -51,7 +52,7 @@ CI / smoke:
   поднимает compose и ждёт health.
 
 Гигиена репозитория:
-- `.gitignore` игнорирует `.pack/`, `adaspeas.zip`, `adaspeas_pack_*.tar.gz`, `__pycache__/`, `*.pyc`.
+- `.gitignore` игнорирует `.pack/`, `adaspeas.tar.gz`, `adaspeas.zip`, `adaspeas_pack_*.tar.gz`, `__pycache__/`, `*.pyc`.
 - В CI есть проверка: в репозитории не должно быть отслеживаемых `__pycache__/` и `.pyc`.
 
 ## 3) “Если сломалось” (коротко)

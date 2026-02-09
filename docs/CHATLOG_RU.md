@@ -396,8 +396,14 @@
 - Worker: добавлен retry/backoff на инициализацию DB схемы (чтобы не уходить в crash-loop при временных проблемах).
 - Tests: добавлен регресс-тест на апгрейд БД, где `users.status` уже существует при `schema_version=5`.
 
-### 2026-02-09 15:40 MSK
-Цель: починить CI после `NameError: _executescript_idempotent` и добить идемпотентность миграций.
+### 2026-02-09 16:30 MSK
+Цель: стабилизировать миграции и процесс применения pack после инцидента с «репозиторий очистило/попросило пароль».
 
 Что сделано:
-- DB: добавлен `_executescript_idempotent(...)` (дефолтно `executescript`, но при `duplicate column name` безопасно доигрывает простые миграции по-операторно; миграции с `CREATE TRIGGER`/FTS остаются через `executescript`).
+- DB: определён `_executescript_idempotent(...)` (раньше был вызов без определения → падали тесты/CI).
+- DB: расширено «прощение» ошибок в `_executescript_tolerant(...)` (игнорируем `duplicate column name` и `already exists` при дрейфе схемы).
+- Docs: обновлён `docs/PACK_APPLY_TEMPLATE_RU.md` (авто-перевод `origin` на SSH при https, перенос локальных `adaspeas.tar.gz/adaspeas.zip` из корня репо, чтобы не ломать чистоту дерева и не получать prompt логина/пароля).
+- Git: `.gitignore` теперь игнорирует локальные архивы `adaspeas.tar.gz/adaspeas.zip`.
+
+Следующие шаги:
+- Применить pack, прогнать `pytest -q` (если установлен) и повторить deploy.

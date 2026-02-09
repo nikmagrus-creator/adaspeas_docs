@@ -17,3 +17,7 @@ adaspeas_pack_*.tar.gz
 .env
 .env.*
 !.env.example
+
+# Local archives (never commit)
+adaspeas.tar.gz
+adaspeas.zip

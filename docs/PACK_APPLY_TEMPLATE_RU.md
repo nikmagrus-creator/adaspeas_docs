@@ -36,6 +36,13 @@ git checkout main &&
 
 git fetch origin --prune &&
 
+# Перевести origin на SSH (чтобы GitHub не спрашивал логин/пароль)
+origin_url="$(git remote get-url origin)" &&
+echo "origin=$origin_url" &&
+if echo "$origin_url" | grep -q '^https://github.com/'; then
+  git remote set-url origin git@github.com:nikmagrus-creator/adaspeas_docs.git || true
+fi &&
+
 # Снять любые незавершённые операции (частая причина "needs merge")
 git cherry-pick --abort >/dev/null 2>&1 || true &&
 git merge --abort >/dev/null 2>&1 || true &&
@@ -49,11 +56,13 @@ git reset --hard origin/main &&
 
 git pull --ff-only &&
 
-# Если в корне репозитория лежит adaspeas.zip (архив для анализа), вынеси его из репо,
-# чтобы не поймать 'репозиторий не чистый' до распаковки pack.
-if test -f adaspeas.zip; then
-  mv -v adaspeas.zip "/media/nik/0C30B3CF30B3BE50/Загрузки/" || true
-fi &&
+# Если в корне репозитория лежат архивы для анализа (adaspeas.zip / adaspeas.tar.gz),
+# вынеси их из репо, чтобы не ловить 'репозиторий не чистый'.
+for f in adaspeas.zip adaspeas.tar.gz; do
+  if test -f "$f"; then
+    mv -v "$f" "/media/nik/0C30B3CF30B3BE50/Загрузки/" || rm -f "$f" || true
+  fi
+done &&
 
 # Repo должен быть чистым перед применением pack
 test -z "$(git status --porcelain)" || { echo "Репозиторий не чистый. Сначала закоммить/убери изменения и повтори.";  git status --porcelain; false; } &&
@@ -115,11 +124,12 @@ fi
 - Если тебе прислали "полный zip репозитория" и внутри есть `.git/`, **не распаковывай его поверх своего репозитория**. Нужен именно инкрементальный pack.
 
 - Если после вставки команд в терминал появился странный файл вида `:contentReference[...]` — это результат случайного символа `>` в скопированном тексте (редирект создаёт файл). Такой файл удаляем и игнорируем (см. `.gitignore`).
-Актуально на: 2026-02-08 22:30 MSK
+Актуально на: 2026-02-09 12:05 MSK
 
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-09 12:05 MSK | ChatGPT | doc | В шаблон добавлено: авто-перевод origin на SSH (чтобы не спрашивал пароль), авто-вынесение adaspeas.tar.gz из корня репо (как и zip) | |
 | 2026-02-08 22:30 MSK | ChatGPT | doc | Фикс удаления по `.pack/deleted.txt` (rm всегда выполняется); защита от мусора `:contentReference*` (копипаст/редирект) + ignore/авто-удаление перед `git add -A` | |
 | 2026-02-07 19:45 MSK | ChatGPT | doc | Добавлено: авто-вынесение adaspeas.zip перед проверкой repo clean; уточнено: артефакты pack/zip хранить вне репо | |
 | 2026-02-07 17:59 MSK | ChatGPT | doc | Уточнено: pack в чате всегда сопровождается этим блоком команд с подставленным именем файла и commit message | |
