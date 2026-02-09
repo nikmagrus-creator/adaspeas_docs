@@ -387,3 +387,11 @@
 
 Следующие шаги:
 - В новом чате первая инструкция: «прочитай docs/INDEX_RU.md и строго следуй docs/WORKFLOW_CONTRACT_RU.md».
+
+### 2026-02-09 15:10 MSK
+Цель: починить деплой после падения worker из-за `sqlite3.OperationalError: duplicate column name: status`.
+
+Что сделано:
+- DB: миграция v6 сделана идемпотентной (users.status/user_note/expires_at/warned_24h_at/updated_at добавляются только если отсутствуют, через PRAGMA table_info).
+- Worker: добавлен retry/backoff на инициализацию DB схемы (чтобы не уходить в crash-loop при временных проблемах).
+- Tests: добавлен регресс-тест на апгрейд БД, где `users.status` уже существует при `schema_version=5`.

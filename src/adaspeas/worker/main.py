@@ -414,8 +414,25 @@ async def worker_loop(settings: Settings) -> None:
         bot = Bot(token=settings.bot_token)
     storage = make_storage_client(settings)
 
-    db = await db_mod.connect(settings.sqlite_path)
-    await db_mod.ensure_schema(db)
+    db = None
+    backoff = 1
+    max_backoff = 30
+    while True:
+        try:
+            db = await db_mod.connect(settings.sqlite_path)
+            await db_mod.ensure_schema(db)
+            break
+        except Exception as e:
+            try:
+                if db is not None:
+                    await db.close()
+            except Exception:
+                pass
+            db = None
+            log.error("db_init_retry", err=str(e), backoff_s=backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(max_backoff, backoff * 2)
+
     r = await get_redis(settings.redis_url)
 
     scheduler_task: asyncio.Task | None = None

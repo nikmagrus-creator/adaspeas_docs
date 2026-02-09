@@ -22,3 +22,32 @@ async def test_schema_init_and_user_upsert():
         assert u and u['status'] in {'guest','pending','active','expired','blocked'}
         await db.close()
 
+@pytest.mark.asyncio
+async def test_schema_upgrade_tolerates_existing_status_column():
+    # Repro for prod: DB already has users.status but schema_version < 6, so v6 used to crash with
+    # sqlite3.OperationalError: duplicate column name: status.
+    with tempfile.NamedTemporaryFile(suffix='.sqlite') as tmp:
+        db = await db_mod.connect(tmp.name)
+
+        # create schema_version + v1 tables
+        await db.executescript(db_mod.SCHEMA_V1)
+        await db.execute("INSERT INTO schema_version(version) VALUES (1)")
+        await db.commit()
+
+        # apply migrations up to v5
+        for ver in range(2, 6):
+            await db.executescript(db_mod.MIGRATIONS[ver])
+            await db.execute("UPDATE schema_version SET version=?", (ver,))
+            await db.commit()
+
+        # simulate pre-existing column created out-of-band
+        await db.execute("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'guest'")
+        await db.execute("UPDATE schema_version SET version=?", (5,))
+        await db.commit()
+
+        # should not raise
+        await db_mod.ensure_schema(db)
+
+        v = await db_mod._get_schema_version(db)
+        assert v == db_mod.TARGET_SCHEMA_VERSION
+        await db.close()

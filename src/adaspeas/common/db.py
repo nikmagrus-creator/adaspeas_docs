@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import aiosqlite
+import sqlite3
 import re
 import uuid
 
@@ -102,9 +103,21 @@ ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'guest';
 ALTER TABLE users ADD COLUMN user_note TEXT;
 ALTER TABLE users ADD COLUMN expires_at TEXT;
 ALTER TABLE users ADD COLUMN warned_24h_at TEXT;
-ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'));
+ALTER TABLE users ADD COLUMN updated_at TEXT;
+UPDATE users SET updated_at = datetime('now') WHERE updated_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_status_expires ON users(status, expires_at);
 """
+
+async def _apply_migration_v6(db: aiosqlite.Connection) -> None:
+    # v6: access control columns in users. Must be idempotent for old DBs that already have some columns.
+    await _add_column_if_missing(db, "users", "status", "TEXT NOT NULL DEFAULT 'guest'")
+    await _add_column_if_missing(db, "users", "user_note", "TEXT")
+    await _add_column_if_missing(db, "users", "expires_at", "TEXT")
+    await _add_column_if_missing(db, "users", "warned_24h_at", "TEXT")
+    await _add_column_if_missing(db, "users", "updated_at", "TEXT")
+    await db.execute("UPDATE users SET updated_at = datetime('now') WHERE updated_at IS NULL")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_users_status_expires ON users(status, expires_at)")
+
 
 
 # v7: operations transparency (Milestone 3): download audit log + indexes for stats.
@@ -220,9 +233,47 @@ async def _get_schema_version(db: aiosqlite.Connection) -> int:
     return int(row[0])
 
 
+
+async def _table_columns(db: aiosqlite.Connection, table: str) -> set[str]:
+    # SQLite does not support ALTER TABLE ... ADD COLUMN IF NOT EXISTS reliably across versions,
+    # so we introspect the schema and apply additive migrations idempotently.
+    # PRAGMA table_info returns one row per column.
+    cur = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cur.fetchall()
+    return {str(r[1]) for r in rows}
+
+
+async def _add_column_if_missing(
+    db: aiosqlite.Connection, table: str, column: str, ddl: str
+) -> None:
+    cols = await _table_columns(db, table)
+    if column in cols:
+        return
+    await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
 async def get_schema_version(db: aiosqlite.Connection) -> int:
     """Return current schema version (0 if DB is uninitialized)."""
     return await _get_schema_version(db)
+
+
+async def _executescript_tolerant(db: aiosqlite.Connection, script: str) -> None:
+    # Run statements one-by-one so we can ignore specific idempotency errors
+    # (e.g., older prod DBs with schema drift where a column already exists).
+    stmts = []
+    for chunk in script.split(";"):
+        stmt = chunk.strip()
+        if not stmt:
+            continue
+        stmts.append(stmt)
+
+    for stmt in stmts:
+        try:
+            await db.execute(stmt)
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if "duplicate column name" in msg:
+                continue
+            raise
 
 
 async def count_rows(db: aiosqlite.Connection, table: str) -> int:
@@ -262,7 +313,10 @@ async def ensure_schema(db: aiosqlite.Connection) -> None:
         script = MIGRATIONS.get(ver)
         if not script:
             raise RuntimeError(f"Missing migration script for schema version {ver}")
-        await db.executescript(script)
+        if ver == 6:
+            await _apply_migration_v6(db)
+        else:
+            await _executescript_idempotent(db, script)
         await db.execute("UPDATE schema_version SET version=?", (ver,))
         await db.commit()
 
