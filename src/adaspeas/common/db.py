@@ -942,11 +942,11 @@ async def search_catalog_items(
         FROM catalog_items
         WHERE is_deleted=0
           AND path LIKE ?
-          AND title LIKE ? ESCAPE '\\'
+          AND (title LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\')
         ORDER BY kind DESC, title ASC
         LIMIT ? OFFSET ?
         """,
-        (scope_like, like, int(limit_plus), int(offset)),
+        (scope_like, like, like, int(limit_plus), int(offset)),
     )
     rows = await cur.fetchall()
     items = [{"id": int(r[0]), "kind": r[1], "title": r[2], "size_bytes": r[3], "path": r[4]} for r in rows]

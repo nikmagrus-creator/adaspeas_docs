@@ -364,5 +364,7 @@
 - Docs: обновлён `docs/HANDOFF_RU.md` (актуальность, раздел про `/users` и про типовые фейлы деплоя).
 - Docs: `docs/PACK_APPLY_TEMPLATE_RU.md` дополнен заметкой про терминал “Custom command” (чтобы окно не закрывалось на ошибке).
 
+- Bot: исправлен разбор callback_data `nav:<id>:<offset>` (раньше падало на `int("id:0")`), добавлена передача offset в render_dir.
+- DB: fallback поиска (LIKE) теперь ищет по title и path, добавлен тест на случай отсутствия FTS.
 Следующие шаги:
 - Перепроверить деплой на VPS (после pull) что worker становится `healthy`, и миграции больше не падают.

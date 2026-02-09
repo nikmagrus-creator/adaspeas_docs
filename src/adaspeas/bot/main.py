@@ -964,11 +964,20 @@ async def main() -> None:
 
     @dp.callback_query(F.data.startswith("nav:"))
     async def nav_cb(q: CallbackQuery) -> None:
+        # callback_data: nav:<folder_id>[:<offset>]
+        parts = (q.data or "").split(":")
+        if len(parts) < 2:
+            await q.answer("Некорректная команда")
+            return
         try:
-            item_id = int((q.data or "").split(":", 1)[1])
+            item_id = int(parts[1])
         except Exception:
             await q.answer("Некорректная команда")
             return
+        try:
+            offset = int(parts[2]) if len(parts) >= 3 else 0
+        except Exception:
+            offset = 0
 
 
         async def _reply(text: str) -> None:
@@ -998,7 +1007,7 @@ async def main() -> None:
             await q.answer("Это не папка")
             return
 
-        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id)
+        text, markup = await render_dir(str(item.get("path") or root_path), viewer_tg_user_id=q.from_user.id, offset=offset)
         if q.message:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()

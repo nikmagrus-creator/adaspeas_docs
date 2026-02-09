@@ -46,3 +46,5 @@
 - fix: prod compose healthcheck без переносов строк; caddy не блокирует деплой ожиданием bot healthy
 - fix: worker: notify_user принимает settings (устранён NameError)
 - chore: удалены артефакты __pycache__/, *.pyc и .pytest_cache/ (не должны попадать в репо/архивы)
+- fix: bot: nav callback корректно парсит `nav:<id>:<offset>` и сохраняет пагинацию
+- fix: fallback поиска (LIKE) ищет по title и path; добавлен тест без FTS
