@@ -72,32 +72,16 @@ async def notify_admins(bot: Bot, settings: Settings, text: str) -> None:
 
 async def notify_user(bot: Bot, settings: Settings, chat_id: int, text: str) -> None:
     try:
-        await _call_with_retry(
-            lambda: bot.send_message(chat_id=int(chat_id), text=text),
-            attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3),
-            max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30),
-        )
+        await _call_with_retry(lambda: bot.send_message(chat_id=int(chat_id), text=text), attempts=int(getattr(settings, 'net_retry_attempts', 3) or 3), max_wait_sec=int(getattr(settings, 'net_retry_max_sec', 30) or 30))
     except Exception:
         pass
 
 
-async def make_app(state: dict) -> web.Application:
+async def make_app() -> web.Application:
     app = web.Application()
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
-
-    async def ready(_request: web.Request) -> web.Response:
-        return web.json_response(
-            {
-                "ok": True,
-                "worker": state.get("worker"),
-                "db": state.get("db"),
-                "redis": state.get("redis"),
-                "last_error": state.get("last_error"),
-                "last_job_at": state.get("last_job_at"),
-            }
-        )
 
     async def metrics(_request: web.Request) -> web.Response:
         payload = generate_latest()
@@ -108,10 +92,8 @@ async def make_app(state: dict) -> web.Application:
 
     app.router.add_get("/", root)
     app.router.add_get("/health", health)
-    app.router.add_get("/ready", ready)
     app.router.add_get("/metrics", metrics)
     return app
-
 
 
 async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path: str, *, max_nodes: int = 5000) -> tuple[int, int]:
@@ -421,50 +403,20 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         JOBS_RUNNING.dec()
 
 
-async def worker_loop(settings: Settings, state: dict) -> None:
+async def worker_loop(settings: Settings) -> None:
     setup_logging(settings.log_level)
 
+    if getattr(settings, "use_local_bot_api", 0):
+        api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
+        session = AiohttpSession(api=api)
+        bot = Bot(token=settings.bot_token, session=session)
+    else:
+        bot = Bot(token=settings.bot_token)
+    storage = make_storage_client(settings)
 
-    # Keep /health alive even if DB/Redis are temporarily unavailable (volume perms, slow startup, etc).
-    backoff = 1
-    max_backoff = int(getattr(settings, "net_retry_max_sec", 30) or 30)
-
-    while True:
-        try:
-            if getattr(settings, "use_local_bot_api", 0):
-                api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
-                session = AiohttpSession(api=api)
-                bot = Bot(token=settings.bot_token, session=session)
-            else:
-                bot = Bot(token=settings.bot_token)
-
-            storage = make_storage_client(settings)
-
-            db = await db_mod.connect(settings.sqlite_path)
-            await db_mod.ensure_schema(db)
-
-            r = await get_redis(settings.redis_url)
-            try:
-                await r.ping()
-            except Exception:
-                raise
-
-            state["db"] = "ok"
-            state["redis"] = "ok"
-            state["worker"] = "running"
-            state["last_error"] = None
-            break
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            state["worker"] = "retrying"
-            state["db"] = "retrying"
-            state["redis"] = "retrying"
-            state["last_error"] = str(e)
-            log.error("worker_init_retry", err=str(e), backoff_s=backoff)
-            await asyncio.sleep(backoff)
-            backoff = min(max_backoff, max(1, backoff * 2))
-
+    db = await db_mod.connect(settings.sqlite_path)
+    await db_mod.ensure_schema(db)
+    r = await get_redis(settings.redis_url)
 
     scheduler_task: asyncio.Task | None = None
     if int(getattr(settings, 'catalog_sync_interval_sec', 0) or 0) > 0:
@@ -476,8 +428,6 @@ async def worker_loop(settings: Settings, state: dict) -> None:
             if job_id is None:
                 await asyncio.sleep(0)
                 continue
-            from datetime import datetime, timezone
-            state["last_job_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
             await process_one(settings, bot, storage, db, r, job_id)
     finally:
         if scheduler_task is not None:
@@ -498,15 +448,13 @@ async def worker_loop(settings: Settings, state: dict) -> None:
 async def main() -> None:
     settings = Settings()
 
-    state: dict = {"worker": "starting", "db": "starting", "redis": "starting", "last_error": None, "last_job_at": None}
-
-    app = await make_app(state)
+    app = await make_app()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=8081)
     await site.start()
 
-    await worker_loop(settings, state)
+    await worker_loop(settings)
 
 
 if __name__ == "__main__":
