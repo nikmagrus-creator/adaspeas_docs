@@ -395,3 +395,9 @@
 - DB: миграция v6 сделана идемпотентной (users.status/user_note/expires_at/warned_24h_at/updated_at добавляются только если отсутствуют, через PRAGMA table_info).
 - Worker: добавлен retry/backoff на инициализацию DB схемы (чтобы не уходить в crash-loop при временных проблемах).
 - Tests: добавлен регресс-тест на апгрейд БД, где `users.status` уже существует при `schema_version=5`.
+
+### 2026-02-09 15:40 MSK
+Цель: починить CI после `NameError: _executescript_idempotent` и добить идемпотентность миграций.
+
+Что сделано:
+- DB: добавлен `_executescript_idempotent(...)` (дефолтно `executescript`, но при `duplicate column name` безопасно доигрывает простые миграции по-операторно; миграции с `CREATE TRIGGER`/FTS остаются через `executescript`).
