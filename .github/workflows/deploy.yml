@@ -293,14 +293,30 @@ jobs:
             export IMAGE="${IMAGE:-${{ needs.build.outputs.image }}}"
 
             dump_state() {
-              echo "\n=== docker compose ps (prod) ==="
+              echo ""
+              echo "=== docker compose ps (prod) ==="
               docker compose -f docker-compose.prod.yml ps || true
-              echo "\n=== docker compose logs (tail, prod) ==="
+              echo ""
+              echo "=== docker compose logs (tail, prod) ==="
               docker compose -f docker-compose.prod.yml logs --no-color --tail 200 bot worker caddy || true
             }
 
+            dump_health() {
+              svc="$1"
+              id="$(docker compose -f docker-compose.prod.yml ps -q "$svc" || true)"
+              echo ""
+              echo "=== health: $svc ==="
+              if [ -z "$id" ]; then
+                echo "no container id"
+                return 0
+              fi
+              # Print last healthcheck attempts (exit code + output)
+              docker inspect --format '{if .State.Health}{.State.Health.Status}{else}none{end}' "$id" 2>/dev/null || true
+              docker inspect --format '{if .State.Health}{range .State.Health.Log}{println .ExitCode .Output}{end}{end}' "$id" 2>/dev/null | tail -n 60 || true
+            }
+
             # If something goes wrong, show container state/logs to avoid "bot is unhealthy" guesswork.
-            trap 'echo "\nDEPLOY FAILED"; dump_state' ERR
+            trap 'echo "\nDEPLOY FAILED"; dump_state; dump_health bot; dump_health worker' ERR
             if [ ! -d "$APP_DIR" ]; then
               echo "APP_DIR $APP_DIR does not exist. Run deploy/bootstrap_vps.sh on the server first."
               exit 2

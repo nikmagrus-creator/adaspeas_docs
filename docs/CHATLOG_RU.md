@@ -379,3 +379,10 @@
 - OPS_RUNBOOK: добавлен чек-лист для кейса `bot/worker unhealthy`.
 - Deploy: добавлен `deploy/make_ai_archive.sh` для сборки чистого исходного архива через `git archive` (без `.git`, кэшей и `.env`).
 
+### 2026-02-09 01:15 MSK
+Цель: починить ложные `bot is unhealthy` в prod деплое.
+
+Что сделано:
+- docker-compose.prod.yml: healthcheck для bot/worker переписан в одну строку (без YAML-переносов, которые ломали `python -c` и давали IndentationError).
+- deploy.yml: при падении деплоя дополнительно печатаем последние healthcheck-логи `docker inspect` для bot/worker (exit code + output).
+
