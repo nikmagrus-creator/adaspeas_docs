@@ -572,6 +572,93 @@ async def main() -> None:
         await notify_admins(f"🆕 Запрос доступа: user_id={uid}, note={note}")
         await m.answer("Заявка отправлена админам. Добавьте /note, если ещё не добавляли.")
 
+    # --- /users admin UI (Milestone 2): search + sessions + pagination ---
+
+    def _clip_text(s: str, n: int) -> str:
+        s = (s or "").strip()
+        if len(s) <= n:
+            return s
+        return s[: max(0, n - 1)] + "…"
+
+    async def _render_users_list(*, token: str, offset: int) -> tuple[str, InlineKeyboardMarkup]:
+        sess = await db_mod.fetch_admin_session(db, token)
+        if not sess:
+            return ("Сессия устарела. Выполните /users заново.", InlineKeyboardMarkup(inline_keyboard=[]))
+
+        qtxt = (sess.get("query") or "").strip()
+        page_size = int(getattr(settings, "admin_users_page_size", 20) or 20)
+        page_size = max(5, min(25, page_size))
+        offset = max(0, int(offset))
+
+        if qtxt:
+            users, has_more = await db_mod.search_users(db, query=qtxt, limit=page_size, offset=offset)
+        else:
+            users, has_more = await db_mod.list_users_page(db, limit=page_size, offset=offset)
+
+        title = "Пользователи"
+        if qtxt:
+            title += f" (поиск: {qtxt})"
+
+        lines: list[str] = [title, f"Показано {len(users)} (offset={offset})"]
+        if not users:
+            lines.append("Пусто.")
+        else:
+            for u in users:
+                uid = int(u["tg_user_id"])
+                st = str(u.get("status") or "guest")
+                exp = u.get("expires_at") or "-"
+                note = _clip_text((u.get("user_note") or "").replace("\n", " "), 32)
+                if note:
+                    lines.append(f"{uid} · {st} · до {exp} · {note}")
+                else:
+                    lines.append(f"{uid} · {st} · до {exp}")
+
+        kb: list[list[InlineKeyboardButton]] = []
+        for u in users:
+            uid = int(u["tg_user_id"])
+            st = str(u.get("status") or "guest")
+            kb.append([InlineKeyboardButton(text=f"👤 {uid} ({st})", callback_data=f"um:{token}:{offset}:{uid}")])
+
+        nav: list[InlineKeyboardButton] = []
+        if offset > 0:
+            nav.append(InlineKeyboardButton(text="◀", callback_data=f"ul:{token}:{max(0, offset - page_size)}"))
+        nav.append(InlineKeyboardButton(text="🔄", callback_data=f"ul:{token}:{offset}"))
+        if has_more:
+            nav.append(InlineKeyboardButton(text="▶", callback_data=f"ul:{token}:{offset + page_size}"))
+        kb.append(nav)
+
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb)
+
+    async def _render_user_menu(*, token: str, offset: int, target_uid: int) -> tuple[str, InlineKeyboardMarkup]:
+        sess = await db_mod.fetch_admin_session(db, token)
+        if not sess:
+            return ("Сессия устарела. Выполните /users заново.", InlineKeyboardMarkup(inline_keyboard=[]))
+
+        target_uid = int(target_uid)
+        u = await db_mod.fetch_user_by_tg_user_id(db, target_uid)
+        if not u:
+            await db_mod.upsert_user(db, target_uid)
+            u = await db_mod.fetch_user_by_tg_user_id(db, target_uid)
+
+        st = str((u or {}).get("status") or "guest")
+        exp = (u or {}).get("expires_at") or "-"
+        note = ((u or {}).get("user_note") or "").strip()
+
+        out = [f"Пользователь {target_uid}", f"status={st}", f"expires_at={exp}"]
+        if note:
+            out.append("note=" + _clip_text(note.replace("\n", " "), 200))
+
+        ttl_default = int(getattr(settings, "default_user_ttl_days", 30) or 30)
+
+        kb: list[list[InlineKeyboardButton]] = []
+        if target_uid not in settings.admin_ids_set():
+            kb.append([InlineKeyboardButton(text=f"✅ Активировать +{ttl_default}d", callback_data=f"ua:act:{target_uid}:{ttl_default}:{token}:{offset}")])
+            kb.append([InlineKeyboardButton(text="➕ Продлить +30d", callback_data=f"ua:ext:{target_uid}:30:{token}:{offset}")])
+            kb.append([InlineKeyboardButton(text="⛔ Заблокировать", callback_data=f"ua:block:{target_uid}:0:{token}:{offset}")])
+
+        kb.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"ul:{token}:{offset}")])
+        return "\n".join(out), InlineKeyboardMarkup(inline_keyboard=kb)
+
     @dp.message(Command("users"))
     async def users_admin(m: Message) -> None:
         REQ_TOTAL.labels(command="users").inc()
@@ -579,31 +666,134 @@ async def main() -> None:
             uid = m.from_user.id if m.from_user else 0
             await m.answer(f"Недостаточно прав. Ваш ID: {uid}.")
             return
-        users = await db_mod.list_users(db, limit=200, offset=0)
-        if not users:
-            await m.answer("Пользователей нет.")
+
+        # /users [query]
+        parts = (m.text or "").split(maxsplit=1)
+        qtxt = parts[1].strip() if len(parts) > 1 else ""
+        ttl = int(getattr(settings, "admin_session_ttl_sec", 3600) or 3600)
+        token = await db_mod.create_admin_session(db, tg_user_id=int(m.from_user.id), query=qtxt, ttl_sec=ttl)
+
+        text, markup = await _render_users_list(token=token, offset=0)
+        await m.answer(text, reply_markup=markup)
+
+    @dp.callback_query(F.data.startswith("ul:"))
+    async def users_list_cb(q: CallbackQuery) -> None:
+        if not is_admin(int(q.from_user.id)):
+            await q.answer("Нет прав")
+            return
+        parts = (q.data or "").split(":")
+        if len(parts) != 3:
+            await q.answer("Некорректно")
+            return
+        _tag, token, offset_s = parts
+        try:
+            offset = int(offset_s)
+        except Exception:
+            await q.answer("Некорректно")
             return
 
-        lines = []
-        kb: list[list[InlineKeyboardButton]] = []
-        ttl_default = int(getattr(settings, "default_user_ttl_days", 30) or 30)
-        for u in users[:40]:
-            uid = int(u["tg_user_id"])
-            st = str(u.get("status") or "guest")
-            exp = u.get("expires_at") or "-"
-            note = (u.get("user_note") or "").replace("\n", " ")[:40]
-            lines.append(f"{uid}: {st}, до {exp}, note={note}")
-            if uid in settings.admin_ids_set():
-                continue
-            kb.append([
-                InlineKeyboardButton(text=f"✅ {uid} +{ttl_default}d", callback_data=f"ua:act:{uid}:{ttl_default}"),
-                InlineKeyboardButton(text="➕ +30d", callback_data=f"ua:ext:{uid}:30"),
-                InlineKeyboardButton(text="⛔", callback_data=f"ua:block:{uid}:0"),
-            ])
+        sess = await db_mod.fetch_admin_session(db, token)
+        if not sess or int(sess.get("tg_user_id") or 0) != int(q.from_user.id):
+            await q.answer("Сессия устарела")
+            return
 
-        text = "Пользователи (последние обновлённые):\n" + "\n".join(lines)
-        await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        text, markup = await _render_users_list(token=token, offset=offset)
+        try:
+            await q.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            pass
+        await q.answer()
 
+    @dp.callback_query(F.data.startswith("um:"))
+    async def users_menu_cb(q: CallbackQuery) -> None:
+        if not is_admin(int(q.from_user.id)):
+            await q.answer("Нет прав")
+            return
+        parts = (q.data or "").split(":")
+        if len(parts) != 4:
+            await q.answer("Некорректно")
+            return
+        _tag, token, offset_s, uid_s = parts
+        try:
+            offset = int(offset_s)
+            uid = int(uid_s)
+        except Exception:
+            await q.answer("Некорректно")
+            return
+
+        sess = await db_mod.fetch_admin_session(db, token)
+        if not sess or int(sess.get("tg_user_id") or 0) != int(q.from_user.id):
+            await q.answer("Сессия устарела")
+            return
+
+        text, markup = await _render_user_menu(token=token, offset=offset, target_uid=uid)
+        try:
+            await q.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            pass
+        await q.answer()
+
+    @dp.callback_query(F.data.startswith("ua:"))
+    async def user_admin_cb(q: CallbackQuery) -> None:
+        if not is_admin(int(q.from_user.id)):
+            await q.answer("Нет прав")
+            return
+        parts = (q.data or "").split(":")
+        token: str | None = None
+        offset = 0
+
+        if len(parts) == 4:
+            _tag, action, uid_s, days_s = parts
+        elif len(parts) == 6:
+            _tag, action, uid_s, days_s, token, offset_s = parts
+            try:
+                offset = int(offset_s)
+            except Exception:
+                offset = 0
+        else:
+            await q.answer("Некорректно")
+            return
+
+        try:
+            uid = int(uid_s)
+            days = int(days_s)
+        except Exception:
+            await q.answer("Некорректно")
+            return
+
+        try:
+            await db_mod.upsert_user(db, uid)
+            if action == "act":
+                await db_mod.activate_user(db, uid, days)
+                await q.answer("Активировано")
+                try:
+                    await bot.send_message(chat_id=uid, text=f"Доступ активирован на {days} дней.")
+                except Exception:
+                    pass
+            elif action == "ext":
+                await db_mod.extend_user(db, uid, days)
+                await q.answer("Продлено")
+                try:
+                    await bot.send_message(chat_id=uid, text=f"Доступ продлён на {days} дней.")
+                except Exception:
+                    pass
+            elif action == "block":
+                await db_mod.set_user_status(db, uid, "blocked", expires_at=None)
+                await q.answer("Заблокирован")
+            else:
+                await q.answer("Неизвестно")
+                return
+
+            if token:
+                text, markup = await _render_user_menu(token=token, offset=offset, target_uid=uid)
+                try:
+                    await q.message.edit_text(text, reply_markup=markup)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            await q.answer("Ошибка")
+            log.warning("user_admin_action_failed", err=str(e), action=action, uid=uid)
 
     @dp.message(Command("audit"))
     async def audit_cmd(m: Message) -> None:

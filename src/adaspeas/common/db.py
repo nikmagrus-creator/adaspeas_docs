@@ -171,9 +171,23 @@ CREATE INDEX IF NOT EXISTS idx_search_sessions_user_created ON search_sessions(t
 """
 
 
+# v10: admin sessions for /users (keep callback_data short for Telegram).
+MIGRATION_V10 = """
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  tg_user_id INTEGER NOT NULL,
+  query TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_user_created ON admin_sessions(tg_user_id, created_at);
+"""
 
 
-TARGET_SCHEMA_VERSION = 9
+
+
+
+TARGET_SCHEMA_VERSION = 10
 MIGRATIONS: dict[int, str] = {
     2: MIGRATION_V2,
     3: MIGRATION_V3,
@@ -183,6 +197,7 @@ MIGRATIONS: dict[int, str] = {
     7: MIGRATION_V7,
     8: MIGRATION_V8,
     9: MIGRATION_V9,
+    10: MIGRATION_V10,
 }
 
 
@@ -352,12 +367,18 @@ async def extend_user(db: aiosqlite.Connection, tg_user_id: int, add_days: int) 
     await set_user_status(db, tg_user_id, "active", expires_at=expires_at)
 
 
-async def list_users(db: aiosqlite.Connection, limit: int = 200, offset: int = 0) -> list[dict]:
+async def list_users_page(db: aiosqlite.Connection, *, limit: int = 200, offset: int = 0) -> tuple[list[dict], bool]:
+    """Return users page ordered by updated_at DESC. has_more is best-effort."""
+    limit = max(1, int(limit))
+    offset = max(0, int(offset))
+    limit_plus = limit + 1
     cur = await db.execute(
         "SELECT tg_user_id, created_at, status, user_note, expires_at, warned_24h_at, updated_at FROM users ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-        (int(limit), int(offset)),
+        (int(limit_plus), int(offset)),
     )
     rows = await cur.fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     out: list[dict] = []
     for r in rows:
         out.append(
@@ -371,7 +392,114 @@ async def list_users(db: aiosqlite.Connection, limit: int = 200, offset: int = 0
                 "updated_at": r[6],
             }
         )
-    return out
+    return out, has_more
+
+
+async def list_users(db: aiosqlite.Connection, limit: int = 200, offset: int = 0) -> list[dict]:
+    """Backward-compatible wrapper."""
+    users, _more = await list_users_page(db, limit=limit, offset=offset)
+    return users
+
+# --- Admin UI sessions and user search (Milestone 2 UX) ---
+
+async def cleanup_admin_sessions(db: aiosqlite.Connection, ttl_sec: int) -> None:
+    if ttl_sec <= 0:
+        return
+    await db.execute(
+        "DELETE FROM admin_sessions WHERE created_at < datetime('now', ?)",
+        (f"-{int(ttl_sec)} seconds",),
+    )
+    await db.commit()
+
+
+async def create_admin_session(
+    db: aiosqlite.Connection,
+    *,
+    tg_user_id: int,
+    query: str | None,
+    ttl_sec: int = 3600,
+) -> str:
+    await cleanup_admin_sessions(db, ttl_sec)
+    token = uuid.uuid4().hex[:16]
+    await db.execute(
+        "INSERT INTO admin_sessions(token, tg_user_id, query) VALUES (?,?,?)",
+        (token, int(tg_user_id), (query or "").strip() or None),
+    )
+    await db.commit()
+    return token
+
+
+async def fetch_admin_session(db: aiosqlite.Connection, token: str) -> dict | None:
+    cur = await db.execute(
+        "SELECT token, created_at, tg_user_id, query FROM admin_sessions WHERE token=?",
+        (token,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    return {"token": str(row[0]), "created_at": row[1], "tg_user_id": int(row[2]), "query": row[3]}
+
+
+async def search_users(
+    db: aiosqlite.Connection,
+    *,
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[dict], bool]:
+    q = (query or "").strip()
+    if not q:
+        return [], False
+
+    limit = max(1, int(limit))
+    offset = max(0, int(offset))
+    limit_plus = limit + 1
+
+    # Numeric search: tg_user_id exact or prefix.
+    if q.isdigit():
+        like = q + "%"
+        cur = await db.execute(
+            """
+            SELECT tg_user_id, created_at, status, user_note, expires_at, warned_24h_at, updated_at
+            FROM users
+            WHERE tg_user_id = ?
+               OR CAST(tg_user_id AS TEXT) LIKE ?
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (int(q), like, int(limit_plus), int(offset)),
+        )
+    else:
+        like = f"%{_like_escape(q)}%"
+        cur = await db.execute(
+            """
+            SELECT tg_user_id, created_at, status, user_note, expires_at, warned_24h_at, updated_at
+            FROM users
+            WHERE status LIKE ? ESCAPE '\'
+               OR (user_note IS NOT NULL AND user_note LIKE ? ESCAPE '\')
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (like, like, int(limit_plus), int(offset)),
+        )
+
+    rows = await cur.fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "tg_user_id": int(r[0]),
+                "created_at": r[1],
+                "status": r[2] or "guest",
+                "user_note": r[3],
+                "expires_at": r[4],
+                "warned_24h_at": r[5],
+                "updated_at": r[6],
+            }
+        )
+    return out, has_more
 
 
 async def expire_users(db: aiosqlite.Connection) -> int:

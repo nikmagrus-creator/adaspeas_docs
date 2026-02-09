@@ -59,6 +59,14 @@ async def test_schema_version_and_required_columns():
         for required in {"token", "created_at", "tg_user_id", "scope_path", "query"}:
             assert required in cols
 
+
+
+        # admin users UI: admin sessions table
+        cur = await db.execute("PRAGMA table_info(admin_sessions)")
+        cols = {r[1] for r in await cur.fetchall()}
+        for required in {"token", "created_at", "tg_user_id", "query"}:
+            assert required in cols
+
         # FTS5 table may appear as virtual table; just ensure it exists in sqlite_master
         cur = await db.execute("SELECT name FROM sqlite_master WHERE type IN ('table','virtual table') AND name='catalog_items_fts'")
         row = await cur.fetchone()
@@ -125,3 +133,5 @@ def test_settings_has_expected_fields():
     assert hasattr(s, "access_warn_check_interval_sec")
 
     assert hasattr(s, "admin_notify_chat_id")
+    assert hasattr(s, "admin_users_page_size")
+    assert hasattr(s, "admin_session_ttl_sec")

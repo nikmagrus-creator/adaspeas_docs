@@ -364,3 +364,17 @@
 - Прогнать деплой и убедиться, что `docker compose ps` показывает `healthy` у `bot/worker`.
 - Если `bot` всё ещё `unhealthy`, смотреть `docker logs adaspeas-bot-1` и проверить доступность `http://127.0.0.1:8080/health` внутри контейнера.
 
+### 2026-02-09 13:10 MSK
+Цель: довести /users до полноценного админ-UI по PRD (поиск + страницы без переполнения callback_data) и закрыть баг «обещал продолжить, но ушёл в другое».
+
+Что сделано:
+- DB schema v10: добавлена таблица `admin_sessions` для токен-сессий админского UI.
+- DB: добавлены `create_admin_session/fetch_admin_session/cleanup_admin_sessions` и `search_users(...)`, плюс `list_users_page(...)` с has_more.
+- Bot: `/users [query]` теперь выдаёт список с пагинацией (prev/next/refresh) и короткими callback_data (`ul:<token>:<offset>`, `um:<token>:<offset>:<uid>`).
+- Bot: действия админа (`ua:*`) поддерживают новый формат с привязкой к сессии и автоматически обновляют экран.
+- Docs: обновлён `docs/WORKFLOW_CONTRACT_RU.md` (правило про «далее» как продолжение незавершённой задачи).
+- Env: обновлён `.env.example` (access-control + /users настройки).
+- Tests: расширен DB-контракт (таблица `admin_sessions` + новые поля settings).
+
+Следующие шаги:
+- (опционально) добавить в user-menu кнопки редактирования note и быстрые TTL-пресеты.

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     access_warn_check_interval_sec: int = 3600
     admin_notify_chat_id: int = 0  # optional: отдельный чат/топик для уведомлений админам
 
+    # Admin UI (/users)
+    admin_users_page_size: int = 20
+    admin_session_ttl_sec: int = 3600
+
     # Storage
     storage_mode: str = "yandex"  # yandex | local
     yandex_oauth_token: str = ""
