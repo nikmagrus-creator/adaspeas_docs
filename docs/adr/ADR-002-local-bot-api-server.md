@@ -1,10 +1,10 @@
 # ADR-002: Использовать Local Bot API Server для доставки файлов
 
-Актуально на: 2026-02-06 12:45 MSK
+Актуально на: 2026-02-09 23:20 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-06 12:45 MSK
-- Deciders: TBD
+- Deciders: Nikolay
 - Technical Story: docs/CHATLOG_RU.md (2026-02-06)
 
 ## Context
@@ -32,7 +32,7 @@ Telegram предоставляет Local Bot API Server (проект `telegram
 - [x] Добавить сервис в `docker-compose.prod.yml` и `docker-compose.yml` (через profile `localbotapi`).
 - [x] Добавить переключатель `USE_LOCAL_BOT_API` + `LOCAL_BOT_API_BASE` в `.env.example`.
 - [x] Переключать aiogram (base URL) в bot/worker.
-- [ ] Поддержать автозапуск профиля `localbotapi` на прод‑деплое (если флаг включён).
+- [x] Поддержать автозапуск профиля `localbotapi` на прод‑деплое (если флаг включён).
 - [ ] Добавить e2e проверку на файл > 50 MB (или хотя бы ручной runbook сценарий).
 
 ## Links
