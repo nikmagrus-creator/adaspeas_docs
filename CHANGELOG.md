@@ -9,7 +9,6 @@
 - fix: worker — ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter)
 
 ### Added
-- feat: /users — админ-список пользователей с поиском/страницами и токен-сессиями (schema v10: admin_sessions)
 - feat: аудит скачиваний (таблица download_audit) + админ-команды /audit и /stats
 - ops: скрипт deploy/backup_db.py и конкретизированы команды бэкапов в OPS_RUNBOOK_RU.md
 - docs: CHATLOG_RU.md (журнал итогов сессий, память чатов)
