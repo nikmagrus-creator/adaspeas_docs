@@ -32,7 +32,7 @@ make up
 - SQLite включает WAL и пишет рядом с БД файлы `*.db-wal`/`*.db-shm`.
 - При первом запуске Docker может создать `./data` как `root:root`, из-за чего будет падение `attempt to write a readonly database`.
 
-Норма: в `docker-compose.yml` есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+Норма: в `docker-compose.yml` есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <APP_UID>:<APP_GID> /data`.
 
 Аварийно (если уже сломалось): `make fix-data-perms` и повторить `make up`.
 

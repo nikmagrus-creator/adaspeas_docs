@@ -4,10 +4,10 @@ env:
 	@test -f .env || cp .env.example .env
 
 # Локальный запуск (Linux Mint/Ubuntu):
-# - выставляем UID/GID текущего пользователя, чтобы файлы в ./data не становились root:root
+# - выставляем APP_UID/APP_GID текущего пользователя, чтобы файлы в ./data не становились root:root
 # - init-app-data всё равно подстрахует первый запуск (см. docker-compose.yml)
 up: env
-	UID=$$(id -u) GID=$$(id -g) docker compose up --build
+	APP_UID=$$(id -u) APP_GID=$$(id -g) docker compose up --build
 
 down:
 	docker compose down --remove-orphans
@@ -28,7 +28,7 @@ logs-prod:
 # Аварийные команды: починка прав на /data (SQLite WAL).
 # Обычно не нужны, потому что init-app-data one-shot выполняется перед bot/worker.
 fix-data-perms: env
-	UID=$$(id -u) GID=$$(id -g) docker compose run --rm init-app-data
+	APP_UID=$$(id -u) APP_GID=$$(id -g) docker compose run --rm init-app-data
 
 fix-data-perms-prod: env
 	docker compose -f docker-compose.prod.yml run --rm init-app-data

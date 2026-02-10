@@ -531,3 +531,23 @@
 
 Следующие шаги:
 - Нет.
+
+### 2026-02-11 00:20 MSK
+Цель: устранить коллизию `UID/GID` vs `APP_UID/APP_GID` в dev-сценарии (Compose/Makefile/доки) и убрать bash-предупреждение “UID: readonly variable”.
+
+Что сделано:
+- Dev compose: `docker-compose.yml` переключён на `APP_UID/APP_GID` (как `docker-compose.prod.yml`).
+- Makefile: `make up` и `make fix-data-perms` теперь выставляют `APP_UID/APP_GID` (вместо `UID/GID`).
+- Docs: README/TECH/OPS приведены к одному формату `chown -R <APP_UID>:<APP_GID> /data`.
+
+Документы/файлы обновлены:
+- `docker-compose.yml`
+- `Makefile`
+- `README.md`
+- `docs/TECH_SPEC_RU.md`
+- `docs/OPS_RUNBOOK_RU.md`
+- `docs/CHATLOG_RU.md`
+- `CHANGELOG.md`
+
+Следующие шаги:
+- Нет.

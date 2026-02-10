@@ -1,6 +1,6 @@
 # OPS_RUNBOOK (RU): эксплуатация, инциденты, обслуживание
 
-Актуально на: 2026-02-10 19:15 MSK
+Актуально на: 2026-02-11 00:20 MSK
 
 
 ## 1) Компоненты в проде
@@ -141,7 +141,7 @@ docker compose -f docker-compose.prod.yml run --rm bot sh -lc 'id; echo "SQLITE_
 ```
 
 Норма:
-- в `docker-compose.prod.yml` и `docker-compose.yml` есть one-shot сервис `init-app-data`, который **перед стартом bot/worker** делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+- в `docker-compose.prod.yml` и `docker-compose.yml` есть one-shot сервис `init-app-data`, который **перед стартом bot/worker** делает `mkdir -p /data && chown -R <APP_UID>:<APP_GID> /data`.
 - поэтому при обычном старте (`make up` / `make up-prod`) этот инцидент не должен повторяться.
 
 Аварийная мера (если нужно поднять прямо сейчас):
@@ -258,6 +258,7 @@ Local Bot API данные:
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-11 00:20 MSK | ChatGPT | ops | Синхронизированы `APP_UID/APP_GID` в dev compose/Makefile и упоминания в runbook (вместо `UID/GID`) | |
 | 2026-02-10 19:15 MSK | ChatGPT | ops | Уточнены формулировки лимитов стандартного Bot API (getFile 20MB) и обновлён штамп актуальности | |
 | 2026-02-10 18:45 MSK | ChatGPT | ops | Уточнены лимиты стандартного Bot API vs Local Bot API Server (upload 50MB/2000MB, download без лимита) + добавлен первоисточник | |
 | 2026-02-08 23:45 MSK | ChatGPT | ops | Milestone 3: конкретизированы бэкапы (скрипт + команды) и актуализированы админ-оповещения (`ADMIN_NOTIFY_CHAT_ID`) | |

@@ -7,7 +7,7 @@ services:
     image: alpine:3.19
     restart: "no"
     user: "0:0"
-    command: ["sh", "-lc", "mkdir -p /data && chown -R ${UID:-1000}:${GID:-1000} /data"]
+    command: ["sh", "-lc", "mkdir -p /data && chown -R ${APP_UID:-1000}:${APP_GID:-1000} /data"]
     volumes:
       - ./data:/data
 
@@ -38,8 +38,8 @@ services:
     build:
       context: .
       args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
+        UID: ${APP_UID:-1000}
+        GID: ${APP_GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.bot.main"]
     env_file: ${ENV_FILE:-.env}
@@ -63,8 +63,8 @@ services:
     build:
       context: .
       args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
+        UID: ${APP_UID:-1000}
+        GID: ${APP_GID:-1000}
     restart: unless-stopped
     command: ["python", "-m", "adaspeas.worker.main"]
     env_file: ${ENV_FILE:-.env}

@@ -1,6 +1,6 @@
 # TECH_SPEC (RU): архитектура и контракты системы
 
-Актуально на: 2026-02-10 23:59 MSK
+Актуально на: 2026-02-11 00:20 MSK
 
 Документ описывает целевую архитектуру связки Telegram ↔ VPS ↔ Яндекс.Диск и то, что должно быть истинным (инварианты). Подробные правила процесса см. в `docs/WORKFLOW_CONTRACT_RU.md`, продуктовые цели — в `docs/PRD_RU.md`.
 
@@ -21,7 +21,7 @@
 - Инвариант: каталог `/data` (bind-mount или volume) **должен быть writable** для UID/GID приложения.
 
 Гарантия:
-- В обоих compose-файлах есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <UID>:<GID> /data`.
+- В обоих compose-файлах есть one-shot сервис `init-app-data`, который перед стартом bot/worker делает `mkdir -p /data && chown -R <APP_UID>:<APP_GID> /data`.
 - Для аварийного восстановления см. `docs/OPS_RUNBOOK_RU.md` (раздел про "readonly database") и цели `make fix-data-perms*`.
 
 Важно: карта выше отражает текущую раскладку файлов, но не означает, что реализация уже соответствует PRD. Несоответствия фиксируем в ROADMAP и ADR.
@@ -247,6 +247,7 @@ Prod (Caddy/HTTPS/метрики):
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-11 00:20 MSK | ChatGPT | doc | Синхронизированы переменные APP_UID/APP_GID в dev compose/Makefile и упоминания в документации | |
 | 2026-02-10 23:59 MSK | ChatGPT | doc | Уточнено разделение уведомлений bot/worker (access_warn_scheduler в bot) | |
 | 2026-02-10 23:45 MSK | ChatGPT | doc | Уточнены формулировки лимитов Bot API в секции env (upload 50MB / getFile 20MB) | |
 | 2026-02-10 18:45 MSK | ChatGPT | doc | Синхронизированы лимиты Telegram, актуальные схемы users/download_audit и список gap относительно кода | |
