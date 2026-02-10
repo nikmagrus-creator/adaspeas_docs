@@ -1,6 +1,6 @@
 # CHATLOG (RU): итоги сессий и память чатов
 
-Актуально на: 2026-02-10 23:55 MSK
+Актуально на: 2026-02-10 23:59 MSK
 
 Примечание про время: время записей и история фиксируются в **MSK (Europe/Moscow, UTC+3)**.
 
@@ -514,19 +514,18 @@
 Следующие шаги:
 - Нет.
 
-### 2026-02-10 23:55 MSK
-Цель: привести ADR к единому шаблону (Links/Consequences) и убрать мелкую коллизию в ADR-006.
+### 2026-02-10 23:59 MSK
+Цель: закрыть коллизии readiness/retry в worker и синхронизировать мелкие комментарии.
 
 Что сделано:
-- `ADR-006`: добавлен раздел `Consequences`, исправлено имя meta-ключа `catalog_last_sync_at`.
-- `ADR-002/003/008/009`: `Links` приведены к шаблону (Chatlog/Related ADRs/Changelog), внешние ссылки сохранены.
+- Worker: добавлен `/ready` и состояние init DB/Redis/Telegram + метки последней выполненной задачи.
+- Worker: инициализация SQLite/Redis с retry/backoff без падения процесса; при переподключении Redis перезапускается scheduler.
+- Docs: TECH_SPEC уточнён по месту выполнения предупреждений об истечении доступа (bot); `.env.example` комментарий синхронизирован.
 
-Документы обновлены:
-- `docs/adr/ADR-002-local-bot-api-server.md`
-- `docs/adr/ADR-003-change-tracking-and-idea-backlog.md`
-- `docs/adr/ADR-006-inline-catalog-nav-and-parent-path.md`
-- `docs/adr/ADR-008-catalog-search-fts5.md`
-- `docs/adr/ADR-009-worker-retries-tenacity.md`
+Документы/файлы обновлены:
+- `src/adaspeas/worker/main.py`
+- `docs/TECH_SPEC_RU.md`
+- `.env.example`
 - `docs/CHATLOG_RU.md`
 - `CHANGELOG.md`
 

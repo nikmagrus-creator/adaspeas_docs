@@ -8,7 +8,7 @@ import uuid
 
 from aiohttp import web
 from aiogram import Bot
-from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramServerError
+from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import FSInputFile
@@ -25,6 +25,12 @@ from adaspeas.common.queue import get_redis, enqueue, dequeue
 from adaspeas.storage import StorageClient, make_storage_client
 
 log = structlog.get_logger()
+
+
+def _iso(dt: datetime | None) -> str | None:
+    if not dt:
+        return None
+    return dt.astimezone(timezone.utc).isoformat()
 
 # --- Network retry/backoff (IDEA-004) ---
 _RETRIABLE_SEND = (TelegramRetryAfter, TelegramNetworkError, TelegramServerError, httpx.HTTPError, asyncio.TimeoutError, ConnectionError)
@@ -77,7 +83,7 @@ async def notify_user(bot: Bot, settings: Settings, chat_id: int, text: str) -> 
         pass
 
 
-async def make_app() -> web.Application:
+async def make_app(state: dict) -> web.Application:
     app = web.Application()
 
     async def health(_request: web.Request) -> web.Response:
@@ -87,13 +93,81 @@ async def make_app() -> web.Application:
         payload = generate_latest()
         return web.Response(body=payload, content_type=CONTENT_TYPE_LATEST)
 
+    async def ready(_request: web.Request) -> web.Response:
+        # Keep it JSON and operator-friendly.
+        return web.json_response(
+            {
+                "ok": True,
+                "worker": state.get("worker"),
+                "db": state.get("db"),
+                "redis": state.get("redis"),
+                "telegram": state.get("telegram"),
+                "started_at": state.get("started_at"),
+                "last_init_error": state.get("last_init_error"),
+                "last_job_id": state.get("last_job_id"),
+                "last_job_ok_at": state.get("last_job_ok_at"),
+                "last_job_error": state.get("last_job_error"),
+                "last_job_error_at": state.get("last_job_error_at"),
+            }
+        )
+
     async def root(_request: web.Request) -> web.StreamResponse:
         raise web.HTTPFound("/health")
 
     app.router.add_get("/", root)
     app.router.add_get("/health", health)
+    app.router.add_get("/ready", ready)
     app.router.add_get("/metrics", metrics)
     return app
+
+
+async def _init_db_with_retry(settings: Settings, state: dict):
+    delay = 1
+    state["db"] = "starting"
+    while True:
+        try:
+            db = await db_mod.connect(settings.sqlite_path)
+            await db_mod.ensure_schema(db)
+            state["db"] = "ok"
+            state["last_init_error"] = None
+            return db
+        except Exception as e:
+            state["db"] = "retrying"
+            state["last_init_error"] = f"db: {e}"
+            log.warning("db_init_retry", err=str(e))
+            await asyncio.sleep(min(30, delay))
+            delay = min(30, delay * 2)
+
+
+async def _init_redis_with_retry(settings: Settings, state: dict):
+    delay = 1
+    state["redis"] = "starting"
+    while True:
+        try:
+            r = await get_redis(settings.redis_url)
+            await r.ping()
+            state["redis"] = "ok"
+            state["last_init_error"] = None
+            return r
+        except Exception as e:
+            state["redis"] = "retrying"
+            state["last_init_error"] = f"redis: {e}"
+            log.warning("redis_init_retry", err=str(e))
+            await asyncio.sleep(min(30, delay))
+            delay = min(30, delay * 2)
+
+
+async def _telegram_handshake_best_effort(bot: Bot, state: dict) -> None:
+    # Do not block startup: just try to verify token/network once and reflect in /ready.
+    try:
+        await bot.get_me()
+        state["telegram"] = "ok"
+    except TelegramUnauthorizedError as e:
+        state["telegram"] = "unauthorized"
+        state["last_init_error"] = f"telegram: {e}"
+    except Exception as e:
+        state["telegram"] = "error"
+        state["last_init_error"] = f"telegram: {e}"
 
 
 async def sync_catalog(settings: Settings, storage: StorageClient, db, root_path: str, *, max_nodes: int = 5000) -> tuple[int, int]:
@@ -225,17 +299,22 @@ async def periodic_sync_scheduler(settings: Settings, db, r) -> None:
         await asyncio.sleep(interval)
 
 
-async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, r, job_id: int) -> None:
+async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, r, job_id: int, state: dict | None = None) -> str:
     job = await db_mod.fetch_job(db, job_id)
 
     # Skip if already terminal
     if job["state"] in {"succeeded", "failed", "cancelled"}:
-        return
+        return "skipped"
 
     job_type = (job.get('job_type') or 'download').strip().lower()
 
     await db_mod.set_job_state(db, job_id, "running")
     JOBS_RUNNING.inc()
+
+    if state is not None:
+        state["last_job_id"] = job_id
+
+    result = "unknown"
 
     attempts = int(getattr(settings, 'net_retry_attempts', 3) or 3)
     max_wait_sec = int(getattr(settings, 'net_retry_max_sec', 30) or 30)
@@ -276,7 +355,13 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
             await db_mod.set_job_state(db, job_id, "succeeded")
             JOBS_SUCCEEDED.inc()
             log.info('job_succeeded', job_id=job_id, mode='sync_catalog', items=n, deleted=deleted)
-            return
+            result = "succeeded"
+            if state is not None:
+                ok_at = _iso(datetime.now(timezone.utc).replace(microsecond=0))
+                state["last_job_ok_at"] = ok_at
+                state["last_job_error"] = None
+                state["last_job_error_at"] = None
+            return result
 
         # Default: download job
         item = await db_mod.fetch_catalog_item(db, job["catalog_item_id"])
@@ -321,7 +406,13 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                     )
                 except Exception:
                     pass
-                return
+                result = "succeeded"
+                if state is not None:
+                    ok_at = _iso(datetime.now(timezone.utc).replace(microsecond=0))
+                    state["last_job_ok_at"] = ok_at
+                    state["last_job_error"] = None
+                    state["last_job_error_at"] = None
+                return result
             except Exception as e:
                 # If cached file_id became invalid, drop it and retry via download/upload.
                 log.warning("tg_file_id_failed", job_id=job_id, err=str(e))
@@ -371,20 +462,27 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         except Exception:
             pass
         log.info("job_succeeded", job_id=job_id)
+        result = "succeeded"
 
     except Exception as e:
         err = str(e)
         attempt = await db_mod.bump_attempt(db, job_id, err)
         log.warning("job_failed", job_id=job_id, attempt=attempt, err=err)
 
+        if state is not None:
+            state["last_job_error"] = err
+            state["last_job_error_at"] = _iso(datetime.now(timezone.utc).replace(microsecond=0))
+
         max_attempts = max(1, int(getattr(settings, "job_max_attempts", 3)))
         if attempt < max_attempts:
             await db_mod.set_job_state(db, job_id, "queued", err)
             await enqueue(r, job_id)
             JOBS_RETRIED.inc()
+            result = "retried"
         else:
             await db_mod.set_job_state(db, job_id, "failed", err)
             JOBS_FAILED.inc()
+            result = "failed"
 
             # Final failure: record audit + notify.
             if job_type == "download":
@@ -423,9 +521,18 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
     finally:
         JOBS_RUNNING.dec()
 
+    if result == "succeeded" and state is not None:
+        state["last_job_ok_at"] = _iso(datetime.now(timezone.utc).replace(microsecond=0))
+        state["last_job_error"] = None
+        state["last_job_error_at"] = None
 
-async def worker_loop(settings: Settings) -> None:
-    setup_logging(settings.log_level)
+    return result
+
+
+async def worker_loop(settings: Settings, state: dict) -> None:
+
+    state["worker"] = "starting"
+    state["telegram"] = "starting"
 
     if getattr(settings, "use_local_bot_api", 0):
         api = TelegramAPIServer.from_base(getattr(settings, "local_bot_api_base", "http://local-bot-api:8081"), is_local=True)
@@ -433,23 +540,46 @@ async def worker_loop(settings: Settings) -> None:
         bot = Bot(token=settings.bot_token, session=session)
     else:
         bot = Bot(token=settings.bot_token)
+
+    tg_handshake_task = asyncio.create_task(_telegram_handshake_best_effort(bot, state), name="tg_handshake")
     storage = make_storage_client(settings)
 
-    db = await db_mod.connect(settings.sqlite_path)
-    await db_mod.ensure_schema(db)
-    r = await get_redis(settings.redis_url)
+    db = await _init_db_with_retry(settings, state)
+    r = await _init_redis_with_retry(settings, state)
 
     scheduler_task: asyncio.Task | None = None
     if int(getattr(settings, 'catalog_sync_interval_sec', 0) or 0) > 0:
         scheduler_task = asyncio.create_task(periodic_sync_scheduler(settings, db, r), name='periodic_sync')
 
+    state["worker"] = "running"
+
     try:
         while True:
-            job_id = await dequeue(r, timeout_s=5)
+            try:
+                job_id = await dequeue(r, timeout_s=5)
+            except Exception as e:
+                state["redis"] = "retrying"
+                state["last_init_error"] = f"redis_runtime: {e}"
+                log.warning("redis_runtime_error", err=str(e))
+                try:
+                    await r.close()
+                except Exception:
+                    pass
+                r = await _init_redis_with_retry(settings, state)
+                if scheduler_task is not None:
+                    scheduler_task.cancel()
+                    try:
+                        await scheduler_task
+                    except Exception:
+                        pass
+                    scheduler_task = None
+                if int(getattr(settings, 'catalog_sync_interval_sec', 0) or 0) > 0:
+                    scheduler_task = asyncio.create_task(periodic_sync_scheduler(settings, db, r), name='periodic_sync')
+                continue
             if job_id is None:
                 await asyncio.sleep(0)
                 continue
-            await process_one(settings, bot, storage, db, r, job_id)
+            await process_one(settings, bot, storage, db, r, job_id, state=state)
     finally:
         if scheduler_task is not None:
             scheduler_task.cancel()
@@ -461,21 +591,56 @@ async def worker_loop(settings: Settings) -> None:
             await storage.close()
         except Exception:
             pass
-        await bot.session.close()
-        await db.close()
-        await r.close()
+        try:
+            tg_handshake_task.cancel()
+            await tg_handshake_task
+        except Exception:
+            pass
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
+        try:
+            await db.close()
+        except Exception:
+            pass
+        try:
+            await r.close()
+        except Exception:
+            pass
 
 
 async def main() -> None:
     settings = Settings()
 
-    app = await make_app()
+    setup_logging(settings.log_level)
+
+    state: dict = {
+        "worker": "starting",
+        "db": "starting",
+        "redis": "starting",
+        "telegram": "starting",
+        "started_at": _iso(datetime.now(timezone.utc).replace(microsecond=0)),
+        "last_init_error": None,
+        "last_job_id": None,
+        "last_job_ok_at": None,
+        "last_job_error": None,
+        "last_job_error_at": None,
+    }
+
+    app = await make_app(state)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=8081)
     await site.start()
 
-    await worker_loop(settings)
+    try:
+        await worker_loop(settings, state)
+    finally:
+        try:
+            await runner.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -38,11 +38,16 @@
 - Docs/process: уточнено требование к полному архиву для чата (только tracked-файлы через git archive; архивы с __pycache__/pyc считаются неверным входом).
 
 ### Fixed
+
+- Worker: добавлен `/ready` (состояние init DB/Redis/Telegram + метки последней выполненной задачи), чтобы совпадать с OPS/HANDOFF.
+- Worker: инициализация SQLite/Redis с retry/backoff без падения процесса (как в bot).
+- Docs: уточнено, что предупреждения об истечении доступа сейчас выполняются в bot; комментарий `ACCESS_WARN_CHECK_INTERVAL_SEC` синхронизирован.
+
 - Docs/process: PRE-FLIGHT перечисляет полный архив как `.tar.gz` (не `.zip`).
 - Docs: `docs/HANDOFF_RU.md` больше не ссылается на несуществующий "megapack"; описан правильный переезд через `deploy/make_ai_archive.sh` и обычные pack.
+
 - Docs: устранена коллизия инструкций по полному архиву для чата (zip→tar.gz, make_ai_archive) и приведён формат ADR (001/005/008/009).
-- Docs: гигиена и согласованность (CHATLOG актуальность, OPS лимиты getFile 20MB, перенос штампа в PACK_APPLY_TEMPLATE, ссылки ADR-002).
-- Docs: ADR Links приведены к шаблону (Chatlog/Related ADRs/Changelog), ADR-006 дополнен Consequences.
+- Docs: гигиена и согласованность (CHATLOG актуальность, OPS лимиты getFile 20MB, перенос штампа в PACK_APPLY_TEMPLATE, ссылки ADR-002)
 - Миграции SQLite: идемпотентный раннер больше не ломает `CREATE TRIGGER ... BEGIN ... END;` и умеет исполнять несколько операторов в одной строке.
 - Worker: ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter), включая send_document (upload и cached file_id) и stream_download.
 - Ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data).
