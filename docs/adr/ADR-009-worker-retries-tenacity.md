@@ -1,6 +1,6 @@
 # ADR-009: Ретраи/backoff для Telegram/Yandex через tenacity
 
-Актуально на: 2026-02-10 22:20 MSK
+Актуально на: 2026-02-10 23:55 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-08 22:15 MSK
@@ -21,5 +21,7 @@
 
 ## Links
 - Chatlog: `docs/CHATLOG_RU.md` (2026-02-08 22:15 MSK)
+- Related ADRs: ADR-002 (Local Bot API), ADR-007 (фоновой sync)
+- Changelog: `CHANGELOG.md`
 - tenacity: https://tenacity.readthedocs.io/
 - Telegram Bot API: https://core.telegram.org/bots/api

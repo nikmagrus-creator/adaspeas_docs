@@ -1,6 +1,6 @@
 # ADR-008: Поиск по каталогу через SQLite FTS5 + search_sessions
 
-Актуально на: 2026-02-10 22:20 MSK
+Актуально на: 2026-02-10 23:55 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-08 22:15 MSK
@@ -25,4 +25,5 @@
 ## Links
 - Chatlog: `docs/CHATLOG_RU.md` (2026-02-08 22:15 MSK)
 - Related ADRs: ADR-006, ADR-007
+- Changelog: `CHANGELOG.md`
 - SQLite FTS5: https://www.sqlite.org/fts5.html

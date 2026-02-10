@@ -1,6 +1,6 @@
 # ADR-003: Фиксация изменений, идей и решений (CHANGELOG/CHATLOG/ROADMAP/ADR)
 
-Актуально на: 2026-02-06 12:45 MSK
+Актуально на: 2026-02-10 23:55 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-06 12:45 MSK
@@ -39,7 +39,7 @@
 - каждый патч требует 2–3 коротких правок в доках (но это дешевле, чем помнить на словах).
 
 ## Links
-- `docs/WORKFLOW_CONTRACT_RU.md` (раздел 4.2)
-- `CHANGELOG.md`
-- `docs/CHATLOG_RU.md`
-- `docs/ROADMAP_RU.md`
+- Chatlog: `docs/CHATLOG_RU.md` (записи 2026-02-06)
+- Related ADRs: ADR-005 (main‑only + repo hygiene)
+- Changelog: `CHANGELOG.md`
+- Related docs: `docs/WORKFLOW_CONTRACT_RU.md` (раздел 4.2), `docs/ROADMAP_RU.md`

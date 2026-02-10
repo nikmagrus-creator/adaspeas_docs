@@ -1,6 +1,6 @@
 # CHATLOG (RU): итоги сессий и память чатов
 
-Актуально на: 2026-02-10 23:45 MSK
+Актуально на: 2026-02-10 23:55 MSK
 
 Примечание про время: время записей и история фиксируются в **MSK (Europe/Moscow, UTC+3)**.
 
@@ -508,6 +508,25 @@
 - `README.md`
 - `.env.example`
 - `docs/TECH_SPEC_RU.md`
+- `docs/CHATLOG_RU.md`
+- `CHANGELOG.md`
+
+Следующие шаги:
+- Нет.
+
+### 2026-02-10 23:55 MSK
+Цель: привести ADR к единому шаблону (Links/Consequences) и убрать мелкую коллизию в ADR-006.
+
+Что сделано:
+- `ADR-006`: добавлен раздел `Consequences`, исправлено имя meta-ключа `catalog_last_sync_at`.
+- `ADR-002/003/008/009`: `Links` приведены к шаблону (Chatlog/Related ADRs/Changelog), внешние ссылки сохранены.
+
+Документы обновлены:
+- `docs/adr/ADR-002-local-bot-api-server.md`
+- `docs/adr/ADR-003-change-tracking-and-idea-backlog.md`
+- `docs/adr/ADR-006-inline-catalog-nav-and-parent-path.md`
+- `docs/adr/ADR-008-catalog-search-fts5.md`
+- `docs/adr/ADR-009-worker-retries-tenacity.md`
 - `docs/CHATLOG_RU.md`
 - `CHANGELOG.md`
 

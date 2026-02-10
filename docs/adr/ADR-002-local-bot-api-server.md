@@ -1,6 +1,6 @@
 # ADR-002: Использовать Local Bot API Server для доставки файлов
 
-Актуально на: 2026-02-10 19:15 MSK
+Актуально на: 2026-02-10 23:55 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-06 12:45 MSK
@@ -37,6 +37,8 @@ Telegram предоставляет Local Bot API Server (проект `telegram
 
 ## Links
 - Chatlog: `docs/CHATLOG_RU.md` (2026-02-06 00:10 MSK)
-- Related: `docs/TECH_SPEC_RU.md` (разделы 2.1, 6)
+- Related ADRs: ADR-004 (права на /data), ADR-005 (repo hygiene)
+- Changelog: `CHANGELOG.md`
+- Related docs: `docs/TECH_SPEC_RU.md` (разделы 2.1, 6)
 - Telegram Bot API: лимиты upload (multipart) 50 MB и download через `getFile` 20 MB: https://core.telegram.org/bots/api
 - Local Bot API Server (--local): upload до 2000 MB и download без лимита: https://github.com/tdlib/telegram-bot-api
