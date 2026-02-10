@@ -78,10 +78,17 @@ curl -sSf http://localhost:8080/health
 curl -sSf http://localhost:8080/metrics
 ```
 
-## Большие файлы (выше 50 МБ)
+## Лимиты файлов Telegram Bot API и большие файлы
 
-По умолчанию бот работает через облачный Bot API и упирается в лимиты по размеру файлов.
-Для отправки файлов до 2000 MB (≈2 GB) поднимаем локальный Telegram Bot API Server в режиме `--local`.
+Облачный Bot API (`https://api.telegram.org`):
+- upload (multipart): 10 MB фото, 50 MB прочие файлы;
+- download через `getFile`: до 20 MB;
+- отправка “по HTTP URL” (Telegram сам скачает и отправит): 5 MB фото, 20 MB прочий контент.
+
+Если в каталоге есть файлы, которые упираются в эти лимиты, используем Local Bot API Server (`telegram-bot-api`) в режиме `--local`:
+- upload до 2000 MB;
+- download без ограничения размера (ограничено ресурсами сервера);
+- можно отправлять файл по локальному пути (`file://...`).
 
 Шаги:
 - заполни в `.env`: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
@@ -90,4 +97,5 @@ curl -sSf http://localhost:8080/metrics
 
 Ссылки:
 - Telegram Bot API: https://core.telegram.org/bots/api
+- Local Bot API Server: https://github.com/tdlib/telegram-bot-api
 

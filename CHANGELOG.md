@@ -32,6 +32,7 @@
 - Docs: синхронизированы env-имена и добавлены истории изменений в живые документы (CONTRACT/TECH/OPS/ROADMAP).
 - Ops: Makefile: локальный `make up` выставляет UID/GID текущего пользователя; добавлены `make fix-data-perms*` для ручного запуска init-app-data.
 - Docs: README/TECH/OPS дополнены контрактом `/data` (SQLite WAL) и аварийной процедурой восстановления прав.
+- Docs: README и `.env.example` уточняют обе стороны лимитов Bot API (upload 50 MB / getFile 20 MB) и когда нужен Local Bot API Server.
 - Docs: `.env.example` дополнен `APP_UID/APP_GID` для prod compose (по умолчанию 1000:1000).
 - Docs/process: усилена политика "только main" (шаблон применения паков с optional docker/pytest, инструкция чистки лишних веток origin/локально).
 - Docs/process: уточнено требование к полному архиву для чата (только tracked-файлы через git archive; архивы с __pycache__/pyc считаются неверным входом).

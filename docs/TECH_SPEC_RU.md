@@ -1,6 +1,6 @@
 # TECH_SPEC (RU): архитектура и контракты системы
 
-Актуально на: 2026-02-10 18:45 MSK
+Актуально на: 2026-02-10 23:45 MSK
 
 Документ описывает целевую архитектуру связки Telegram ↔ VPS ↔ Яндекс.Диск и то, что должно быть истинным (инварианты). Подробные правила процесса см. в `docs/WORKFLOW_CONTRACT_RU.md`, продуктовые цели — в `docs/PRD_RU.md`.
 
@@ -217,7 +217,7 @@ UI строится как дерево:
 Если `STORAGE_MODE=local`:
 - `LOCAL_STORAGE_ROOT`
 
-Local Bot API Server (опционально, но нужен для файлов > 50 MB):
+Local Bot API Server (опционально, но нужен для обхода лимитов: upload > 50 MB, getFile download > 20 MB):
 - `USE_LOCAL_BOT_API=1`
 - `LOCAL_BOT_API_BASE` (по умолчанию `http://local-bot-api:8081`)
 - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` (нужны для запуска сервиса `local-bot-api`)
@@ -244,6 +244,7 @@ Prod (Caddy/HTTPS/метрики):
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-10 23:45 MSK | ChatGPT | doc | Уточнены формулировки лимитов Bot API в секции env (upload 50MB / getFile 20MB) | |
 | 2026-02-10 18:45 MSK | ChatGPT | doc | Синхронизированы лимиты Telegram, актуальные схемы users/download_audit и список gap относительно кода | |
 | 2026-02-07 20:10 MSK | ChatGPT | doc | Пагинация /categories, soft-delete каталога, периодический scheduler sync (env) | |
 | 2026-02-07 19:40 MSK | ChatGPT | doc | Синхронизация каталога в фоне: /sync → job_type=sync_catalog, UI DB-only, meta last_sync | |

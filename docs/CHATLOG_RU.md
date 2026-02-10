@@ -1,6 +1,6 @@
 # CHATLOG (RU): итоги сессий и память чатов
 
-Актуально на: 2026-02-10 23:20 MSK
+Актуально на: 2026-02-10 23:45 MSK
 
 Примечание про время: время записей и история фиксируются в **MSK (Europe/Moscow, UTC+3)**.
 
@@ -496,3 +496,20 @@
 Следующие шаги:
 - Нет.
 
+### 2026-02-10 23:45 MSK
+Цель: снять оставшуюся двусмысленность по лимитам файлов Telegram Bot API в быстрых местах (README/.env.example).
+
+Что сделано:
+- README: добавлены точные лимиты cloud Bot API (multipart upload 50 MB, getFile download 20 MB) и кратко перечислены особенности Local Bot API Server.
+- `.env.example`: комментарий про `USE_LOCAL_BOT_API` расширен (upload 50 MB / getFile 20 MB vs local 2000 MB/без лимита).
+- TECH_SPEC: уточнена формулировка “когда нужен Local Bot API Server” в секции env.
+
+Документы обновлены:
+- `README.md`
+- `.env.example`
+- `docs/TECH_SPEC_RU.md`
+- `docs/CHATLOG_RU.md`
+- `CHANGELOG.md`
+
+Следующие шаги:
+- Нет.
