@@ -237,6 +237,9 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
     await db_mod.set_job_state(db, job_id, "running")
     JOBS_RUNNING.inc()
 
+    attempts = int(getattr(settings, 'net_retry_attempts', 3) or 3)
+    max_wait_sec = int(getattr(settings, 'net_retry_max_sec', 30) or 30)
+
     try:
         if job_type == 'sync_catalog':
             # Root path is stored in catalog_items.path for the root folder job.
@@ -254,14 +257,18 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
             # Optional: notify the requester (admin). Never fail the job because of Telegram send.
             if int(job.get("tg_chat_id") or 0) > 0:
                 try:
-                    await bot.send_message(
-                        chat_id=job["tg_chat_id"],
-                        text=(
-                            f"Синхронизация каталога завершена.\n"
-                            f"Обработано: {n}.\n"
-                            f"Удалено (soft-delete): {deleted}.\n"
-                            f"Обновлено: {ts}"
+                    await _call_with_retry(
+                        lambda: bot.send_message(
+                            chat_id=job["tg_chat_id"],
+                            text=(
+                                f"Синхронизация каталога завершена.\n"
+                                f"Обработано: {n}.\n"
+                                f"Удалено (soft-delete): {deleted}.\n"
+                                f"Обновлено: {ts}"
+                            ),
                         ),
+                        attempts=attempts,
+                        max_wait_sec=max_wait_sec,
                     )
                 except Exception:
                     pass
@@ -280,10 +287,14 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         # Fast-path: if Telegram file_id is cached, send without re-downloading.
         if item.get("tg_file_id"):
             try:
-                msg = await bot.send_document(
-                    chat_id=job["tg_chat_id"],
-                    document=item["tg_file_id"],
-                    caption=item["title"],
+                msg = await _call_with_retry(
+                    lambda: bot.send_document(
+                        chat_id=job["tg_chat_id"],
+                        document=item["tg_file_id"],
+                        caption=item["title"],
+                    ),
+                    attempts=attempts,
+                    max_wait_sec=max_wait_sec,
                 )
                 # Refresh cache from Telegram response (file_id may change).
                 if getattr(msg, "document", None):
@@ -317,14 +328,23 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
                 await db_mod.set_catalog_item_tg_file(db, item_id=item["id"], tg_file_id=None, tg_file_unique_id=None)
 
         with tempfile.NamedTemporaryFile(prefix="adaspeas_", suffix=".bin", delete=True) as tmp:
-            async for chunk in storage.stream_download(item["yandex_id"]):
-                tmp.write(chunk)
-            tmp.flush()
+            async def _download_to_tmp() -> None:
+                tmp.seek(0)
+                tmp.truncate(0)
+                async for chunk in storage.stream_download(item["yandex_id"]):
+                    tmp.write(chunk)
+                tmp.flush()
 
-            msg = await bot.send_document(
-                chat_id=job["tg_chat_id"],
-                document=FSInputFile(tmp.name),
-                caption=item["title"],
+            await _call_with_retry(_download_to_tmp, attempts=attempts, max_wait_sec=max_wait_sec)
+
+            msg = await _call_with_retry(
+                lambda: bot.send_document(
+                    chat_id=job["tg_chat_id"],
+                    document=FSInputFile(tmp.name),
+                    caption=item["title"],
+                ),
+                attempts=attempts,
+                max_wait_sec=max_wait_sec,
             )
             if getattr(msg, "document", None):
                 await db_mod.set_catalog_item_tg_file(

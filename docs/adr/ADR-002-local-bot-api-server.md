@@ -4,7 +4,7 @@
 
 - Status: Accepted
 - Date (MSK): 2026-02-06 12:45 MSK
-- Deciders: TBD
+- Deciders: Nikolay
 - Technical Story: docs/CHATLOG_RU.md (2026-02-06)
 
 ## Context

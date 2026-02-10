@@ -270,8 +270,6 @@ async def main() -> None:
                 msg = "Доступ заблокирован."
             elif status == "expired":
                 msg = "Доступ истёк."
-            if expires_at and status == "active":
-                msg += f" Срок: до {expires_at} UTC."
             msg += "\n\nКоманды: /request (заявка), /note <кто вы/зачем нужен доступ>."
             await reply_cb(msg)
             return False

@@ -34,10 +34,11 @@
 - Docs: README/TECH/OPS дополнены контрактом `/data` (SQLite WAL) и аварийной процедурой восстановления прав.
 - Docs: `.env.example` дополнен `APP_UID/APP_GID` для prod compose (по умолчанию 1000:1000).
 - Docs/process: усилена политика "только main" (шаблон применения паков с optional docker/pytest, инструкция чистки лишних веток origin/локально).
+- Docs/process: уточнено требование к полному архиву для чата (только tracked-файлы через git archive; архивы с __pycache__/pyc считаются неверным входом).
 
 ### Fixed
 - Миграции SQLite: идемпотентный раннер больше не ломает `CREATE TRIGGER ... BEGIN ... END;` и умеет исполнять несколько операторов в одной строке.
-- Worker: ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter).
+- Worker: ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter), включая send_document (upload и cached file_id) и stream_download.
 - Ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data).
 - Ops: в `docker-compose.yml` добавлен init-app-data для первого запуска (Docker может создать `./data` как root:root).
 - Docs: уточнены правила запуска на VPS (использовать `docker-compose.prod.yml` / systemd unit).
@@ -50,3 +51,4 @@
 - Bot: nav callback корректно парсит `nav:<id>:<offset>` и сохраняет пагинацию.
 - Fallback поиска (LIKE) ищет по title и path; добавлен тест без FTS.
 - Унифицирован fallback порт Local Bot API (8081) в bot/worker.
+- Bot: убран недостижимый фрагмент в проверке доступа (ensure_active).

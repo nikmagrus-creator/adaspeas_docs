@@ -1,6 +1,6 @@
 # ROADMAP (RU): приоритеты разработки
 
-Актуально на: 2026-02-09 14:30 MSK
+Актуально на: 2026-02-10 16:10 MSK
 Этот документ фиксирует порядок работ. Детали требований см. `docs/PRD_RU.md`, целевую архитектуру — `docs/TECH_SPEC_RU.md`.
 
 
@@ -19,7 +19,7 @@
 - docker‑сервис `local-bot-api` (Compose profile `localbotapi`)
 - переключатель в `.env`: `USE_LOCAL_BOT_API=1` + `LOCAL_BOT_API_BASE`
 - на прод‑деплое профиль поднимается автоматически, если флаг включён
-- TODO: e2e тест на файл > 50 MB
+- IDEA-008: e2e тест на файл > 50 MB (Local Bot API)
 
 3) **Фоновая синхронизация каталога** *(done)*
 - UI читает только SQLite
@@ -67,11 +67,13 @@
 | IDEA-004 | Backoff/ретраи для Telegram/Yandex | done | Backlog | Tenacity, уважение RetryAfter |
 | IDEA-005 | Авто‑включение `localbotapi` на прод‑деплое | done | deploy.yml | По флагу USE_LOCAL_BOT_API |
 | IDEA-006 | CI guard: изменения кода требуют CHANGELOG/CHATLOG | done | deploy.yml | Чтобы не “забывать” след |
+| IDEA-008 | E2E: файл > 50 MB (Local Bot API) | planned | Milestone 1 | Проверка цепочки download→upload |
 
 
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-10 16:10 MSK | ChatGPT | doc | Убран TODO (заменён на IDEA-008) + обновлена актуальность | |
 | 2026-02-09 14:30 MSK | ChatGPT | doc | Milestone 2 переведён в done; обновлены правила переезда/контекста | |
 | 2026-02-08 23:45 MSK | ChatGPT | doc | Milestone 3: аудит скачиваний (download_audit), админ /audit и /stats, уведомления при падениях, заготовка бэкапов | |
 | 2026-02-07 20:10 MSK | ChatGPT | doc | Milestone 1: добавлены пагинация UI, soft-delete и опциональный scheduler синхронизации | |

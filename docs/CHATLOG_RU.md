@@ -398,3 +398,20 @@
 
 Документы обновлены:
 - CHANGELOG / ADR-002 / CHATLOG.
+
+
+### 2026-02-10 16:10 MSK
+Цель: убрать недоработки и коллизии “по факту” (код↔документация) в зоне ретраев/архивов.
+
+Что сделано:
+- Worker: скачивание и отправка файлов в Telegram теперь идут через общий retry/backoff (tenacity) по настройкам `NET_RETRY_*`.
+- Bot: убран недостижимый кусок кода в `ensure_active`.
+- ROADMAP: TODO по e2e >50MB переведён в IDEA-008 (planned), backlog синхронизирован.
+- CONTRACT: уточнено требование к полному архиву: только tracked-файлы (git archive), без `__pycache__/` и прочего игнорируемого мусора.
+- ADR-002: заполнен `Deciders`.
+
+Документы обновлены:
+- docs/WORKFLOW_CONTRACT_RU.md / docs/ROADMAP_RU.md / docs/adr/ADR-002-local-bot-api-server.md / CHANGELOG.md / docs/CHATLOG_RU.md.
+
+Следующие шаги:
+- Реализовать IDEA-008 (e2e сценарий выдачи файла > 50 MB через Local Bot API).
