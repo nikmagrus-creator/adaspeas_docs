@@ -38,6 +38,7 @@
 
 ### Fixed
 
+- Docs/process: PRE-FLIGHT перечисляет полный архив как `.tar.gz` (не `.zip`).
 - Docs: `docs/HANDOFF_RU.md` больше не ссылается на несуществующий "megapack"; описан правильный переезд через `deploy/make_ai_archive.sh` и обычные pack.
 
 - Docs: устранена коллизия инструкций по полному архиву для чата (zip→tar.gz, make_ai_archive) и приведён формат ADR (001/005/008/009).
