@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     net_retry_attempts: int = 3
     net_retry_max_sec: int = 30
 
+    # Max number of attempts for a job before marking it as failed.
+    # Used by worker when a job handler raises.
+    job_max_attempts: int = 3
 
     # Queue
     redis_url: str = "redis://redis:6379/0"

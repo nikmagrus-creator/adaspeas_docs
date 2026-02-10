@@ -377,7 +377,8 @@ async def process_one(settings: Settings, bot: Bot, storage: StorageClient, db, 
         attempt = await db_mod.bump_attempt(db, job_id, err)
         log.warning("job_failed", job_id=job_id, attempt=attempt, err=err)
 
-        if attempt < 3:
+        max_attempts = max(1, int(getattr(settings, "job_max_attempts", 3)))
+        if attempt < max_attempts:
             await db_mod.set_job_state(db, job_id, "queued", err)
             await enqueue(r, job_id)
             JOBS_RETRIED.inc()

@@ -80,11 +80,14 @@ curl -sSf http://localhost:8080/metrics
 
 ## Большие файлы (выше 50 МБ)
 
-По умолчанию бот работает через облачный Bot API и упирается в лимит загрузки файлов.
-Для отправки файлов до 2 ГБ поднимаем локальный Telegram Bot API Server.
+По умолчанию бот работает через облачный Bot API и упирается в лимиты по размеру файлов.
+Для отправки файлов до 2000 MB (≈2 GB) поднимаем локальный Telegram Bot API Server в режиме `--local`.
 
 Шаги:
 - заполни в `.env`: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
 - включи: `USE_LOCAL_BOT_API=1`
 - запусти compose с профилем: `docker compose --profile localbotapi up --build`
+
+Ссылки:
+- Telegram Bot API: https://core.telegram.org/bots/api
 
