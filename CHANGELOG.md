@@ -39,11 +39,10 @@
 
 ### Fixed
 
-- Dev: `docker-compose.yml` и `Makefile` переведены на `APP_UID/APP_GID` (вместо `UID/GID`), чтобы совпадало с prod и не было bash-предупреждений про readonly `UID`.
-
 - Worker: добавлен `/ready` (состояние init DB/Redis/Telegram + метки последней выполненной задачи), чтобы совпадать с OPS/HANDOFF.
 - Worker: инициализация SQLite/Redis с retry/backoff без падения процесса (как в bot).
 - Docs: уточнено, что предупреждения об истечении доступа сейчас выполняются в bot; комментарий `ACCESS_WARN_CHECK_INTERVAL_SEC` синхронизирован.
+- Docs: синхронизированы TECH_SPEC/OPS по месту выполнения предупреждений об истечении доступа (bot scheduler).
 
 - Docs/process: PRE-FLIGHT перечисляет полный архив как `.tar.gz` (не `.zip`).
 - Docs: `docs/HANDOFF_RU.md` больше не ссылается на несуществующий "megapack"; описан правильный переезд через `deploy/make_ai_archive.sh` и обычные pack.
