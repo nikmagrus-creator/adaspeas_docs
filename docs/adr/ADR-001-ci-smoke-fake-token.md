@@ -1,11 +1,11 @@
 # ADR-001: CI-smoke не должен зависеть от реального Telegram токена
 
-Актуально на: 2026-02-10 20:45 MSK
+Актуально на: 2026-02-10 22:20 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-05 19:57 MSK
 - Deciders: Nikolay, ChatGPT
-- Technical Story: docs/CHATLOG_RU.md (2026-02-05: CI/infra стабилизация)
+- Technical Story: CI smoke / healthchecks (`make smoke`, `.env.example`, workflow deploy)
 
 ## Context
 `ci-smoke` запускает `docker compose up` и проверяет `/health` у сервисов.
@@ -21,7 +21,7 @@
 Реализация:
 - при `CI_SMOKE=1` и `TelegramUnauthorizedError` бот логирует проблему и переходит в бесконечное ожидание (не завершая процесс);
 - `.env.example` содержит токен “валидный по формату”, но не реальный секрет (чтобы `.env.example` можно было трекать);
-- в smoke-запуске (например `make smoke`) переменная `CI_SMOKE=1` задаётся явно.
+- в smoke‑запуске (например `make smoke`) переменная `CI_SMOKE=1` задаётся явно.
 
 ## Consequences
 Плюсы:
@@ -31,13 +31,13 @@
 Минусы:
 - smoke не проверяет реальную авторизацию Telegram (это отдельный тип тестов, требующий secrets).
 
-## Alternatives (отклонены)
+## Alternatives (rejected)
 1) Хранить реальный токен в GitHub Secrets и подмешивать в CI.
    Отклонено: не хотим делать smoke зависимым от внешней сети/секретов и усложнять минимальный “green path”.
 2) Полностью отключать запуск бота в CI.
    Отклонено: тогда smoke не проверяет жизнеспособность сервиса.
 
 ## Links
-- Chatlog: docs/CHATLOG_RU.md (2026-02-05: CI/infra стабилизация)
-- Related: docs/OPS_RUNBOOK_RU.md (smoke/health) и docs/WORKFLOW_CONTRACT_RU.md (правила процесса)
-- Changelog: CHANGELOG.md
+- Chatlog: `docs/CHATLOG_RU.md` (записи про CI/SMOKE)
+- Related ADRs: ADR-005
+- Changelog: `CHANGELOG.md`

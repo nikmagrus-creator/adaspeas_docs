@@ -1,6 +1,6 @@
 # CHATLOG (RU): итоги сессий и память чатов
 
-Актуально на: 2026-02-10 20:45 MSK
+Актуально на: 2026-02-10 22:20 MSK
 
 Примечание про время: время записей и история фиксируются в **MSK (Europe/Moscow, UTC+3)**.
 
@@ -99,7 +99,7 @@
 - `deploy.yml`: вычищены ошибки YAML и сделан стабильный pipeline.
 - Guard для `.env`: запрещаем трекать `.env` и `.env.*`, **кроме** `.env.example` (он должен оставаться в git).
 - `ci-smoke`: перед `docker compose config` создаём `.env` из `.env.example` (CI не держит секреты в репо).
-- Trivy: устранён HIGH по `aiohttp` (обновление зависимости). 
+- Trivy: устранён HIGH по `aiohttp` (обновление зависимости).
 - Smoke health: бот больше не умирает при фейковом токене в CI (иначе `get_me` падает с Unauthorized и контейнер рестартится).
 - SQLite/локальное хранилище: пути сделаны smoke‑safe (используем `/tmp/...` в CI, чтобы не упираться в права/отсутствующие директории).
 - GitHub trade-controls: зафиксировано, что remote может быть временно недоступен; на период ограничений репозиторий был переключён в public как временная мера.
@@ -448,22 +448,24 @@
 - Нет.
 
 
-### 2026-02-10 20:45 MSK
-Цель: выровнять ADR по единому шаблону и закрыть недостающие разделы.
+### 2026-02-10 22:20 MSK
+Цель: убрать коллизии zip↔tar.gz в инструкциях архивирования и привести ADR к единому шаблону.
 
 Что сделано:
-- ADR-001/ADR-005: приведены к актуальному шаблону ("Актуально на", поля Status/Date/Deciders, добавлены Links).
-- ADR-007: обновлён штамп актуальности и добавлена ссылка на `CHANGELOG.md`.
-- ADR-008/ADR-009: оформлены по шаблону и дополнены ссылками на первоисточники (SQLite FTS5, Tenacity, Telegram Bot API).
+- INDEX/CONTRACT/HANDOFF/PACK_APPLY_TEMPLATE: полный архив для чата описан как tar.gz (`deploy/make_ai_archive.sh` / `git archive --format=tar.gz`), обновлены примеры и гигиена.
+- ADR: ADR-001/005/008/009 приведены к шаблону ADR-000 (метаданные + Links).
 
-Документы обновлены:
+Документы/файлы обновлены:
+- `docs/INDEX_RU.md`
+- `docs/WORKFLOW_CONTRACT_RU.md`
+- `docs/HANDOFF_RU.md`
+- `docs/PACK_APPLY_TEMPLATE_RU.md`
 - `docs/adr/ADR-001-ci-smoke-fake-token.md`
 - `docs/adr/ADR-005-main-only-and-repo-hygiene.md`
-- `docs/adr/ADR-007-background-catalog-sync.md`
 - `docs/adr/ADR-008-catalog-search-fts5.md`
 - `docs/adr/ADR-009-worker-retries-tenacity.md`
-- `docs/CHATLOG_RU.md`
 - `CHANGELOG.md`
+- `.gitignore`
 
 Следующие шаги:
 - Нет.

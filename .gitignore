@@ -7,8 +7,12 @@ data/
 
 # pack/apply artifacts (do not keep archives inside repo)
 .pack/
-adaspeas.zip
 adaspeas_pack_*.tar.gz
+
+# Local source archives (never commit)
+adaspeas_src_*.tar.gz
+adaspeas.tar.gz
+adaspeas.zip
 
 # защита от мусора при копировании команд из чата
 :contentReference*
@@ -17,7 +21,3 @@ adaspeas_pack_*.tar.gz
 .env
 .env.*
 !.env.example
-
-# Local archives (never commit)
-adaspeas.tar.gz
-adaspeas.zip

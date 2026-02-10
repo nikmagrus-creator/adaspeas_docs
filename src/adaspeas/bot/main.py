@@ -1010,7 +1010,7 @@ async def main() -> None:
             await q.message.edit_text(text, reply_markup=markup)
         await q.answer()
 
-    
+
 
     @dp.callback_query(F.data.startswith("s:"))
     async def search_cb(q: CallbackQuery) -> None:

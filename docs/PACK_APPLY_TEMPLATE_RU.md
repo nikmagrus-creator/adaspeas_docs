@@ -1,6 +1,6 @@
 # Шаблон применения инкрементального пакета (.tar.gz)
 
-Актуально на: 2026-02-10 19:15 MSK
+Актуально на: 2026-02-10 22:20 MSK
 
 Этот документ фиксирует **каноничный** способ применения изменений, присланных как инкрементальный `tar.gz` пакет.
 
@@ -58,9 +58,9 @@ git reset --hard origin/main &&
 
 git pull --ff-only &&
 
-# Если в корне репозитория лежат архивы для анализа (adaspeas.zip / adaspeas.tar.gz),
+# Если в корне репозитория лежат архивы для анализа (adaspeas_src_*.tar.gz / adaspeas.tar.gz / adaspeas.zip),
 # вынеси их из репо, чтобы не ловить 'репозиторий не чистый'.
-for f in adaspeas.zip adaspeas.tar.gz; do
+for f in adaspeas_src_*.tar.gz adaspeas.tar.gz adaspeas.zip; do
   if test -f "$f"; then
     mv -v "$f" "/media/nik/0C30B3CF30B3BE50/Загрузки/" || rm -f "$f" || true
   fi
@@ -131,6 +131,7 @@ fi
 ## История изменений
 | Дата/время (MSK) | Автор | Тип | Кратко | Commit/PR |
 |---|---|---|---|---|
+| 2026-02-10 22:20 MSK | ChatGPT | doc | Шаблон: вынесение из корня также `adaspeas_src_*.tar.gz` (архив из make_ai_archive) | |
 | 2026-02-10 19:15 MSK | ChatGPT | doc | Перенесён штамп “Актуально на” в шапку (единый стиль для доков) | |
 | 2026-02-09 12:05 MSK | ChatGPT | doc | В шаблон добавлено: авто-перевод origin на SSH (чтобы не спрашивал пароль), авто-вынесение adaspeas.tar.gz из корня репо (как и zip) | |
 | 2026-02-08 22:30 MSK | ChatGPT | doc | Фикс удаления по `.pack/deleted.txt` (rm всегда выполняется); защита от мусора `:contentReference*` (копипаст/редирект) + ignore/авто-удаление перед `git add -A` | |
