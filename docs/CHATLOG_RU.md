@@ -1,6 +1,6 @@
 # CHATLOG (RU): итоги сессий и память чатов
 
-Актуально на: 2026-02-10 19:15 MSK
+Актуально на: 2026-02-10 20:45 MSK
 
 Примечание про время: время записей и история фиксируются в **MSK (Europe/Moscow, UTC+3)**.
 
@@ -442,6 +442,27 @@
 - `docs/OPS_RUNBOOK_RU.md`
 - `docs/PACK_APPLY_TEMPLATE_RU.md`
 - `docs/adr/ADR-002-local-bot-api-server.md`
+- `CHANGELOG.md`
+
+Следующие шаги:
+- Нет.
+
+
+### 2026-02-10 20:45 MSK
+Цель: выровнять ADR по единому шаблону и закрыть недостающие разделы.
+
+Что сделано:
+- ADR-001/ADR-005: приведены к актуальному шаблону ("Актуально на", поля Status/Date/Deciders, добавлены Links).
+- ADR-007: обновлён штамп актуальности и добавлена ссылка на `CHANGELOG.md`.
+- ADR-008/ADR-009: оформлены по шаблону и дополнены ссылками на первоисточники (SQLite FTS5, Tenacity, Telegram Bot API).
+
+Документы обновлены:
+- `docs/adr/ADR-001-ci-smoke-fake-token.md`
+- `docs/adr/ADR-005-main-only-and-repo-hygiene.md`
+- `docs/adr/ADR-007-background-catalog-sync.md`
+- `docs/adr/ADR-008-catalog-search-fts5.md`
+- `docs/adr/ADR-009-worker-retries-tenacity.md`
+- `docs/CHATLOG_RU.md`
 - `CHANGELOG.md`
 
 Следующие шаги:

@@ -39,6 +39,7 @@
 ### Fixed
 
 - Docs: гигиена и согласованность (CHATLOG актуальность, OPS лимиты getFile 20MB, перенос штампа в PACK_APPLY_TEMPLATE, ссылки ADR-002)
+- Docs: выровнены ADR-001/ADR-005/ADR-007/ADR-008/ADR-009 (единый шаблон + Links на первоисточники).
 - Миграции SQLite: идемпотентный раннер больше не ломает `CREATE TRIGGER ... BEGIN ... END;` и умеет исполнять несколько операторов в одной строке.
 - Worker: ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter), включая send_document (upload и cached file_id) и stream_download.
 - Ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data).

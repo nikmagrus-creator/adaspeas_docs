@@ -1,6 +1,6 @@
 # ADR-007: Фоновая синхронизация каталога (UI читает только SQLite)
 
-Актуально на: 2026-02-07 19:40 MSK
+Актуально на: 2026-02-10 20:45 MSK
 
 - Status: Accepted
 - Date (MSK): 2026-02-07 19:40 MSK
@@ -45,3 +45,4 @@
 ## Links
 - Chatlog: `docs/CHATLOG_RU.md` (запись 2026-02-07 19:40 MSK)
 - Related ADRs: ADR-006 (inline nav + parent_path), ADR-005 (main‑only + repo hygiene)
+- Changelog: `CHANGELOG.md`
