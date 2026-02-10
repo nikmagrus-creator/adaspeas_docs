@@ -37,6 +37,8 @@
 - Docs/process: уточнено требование к полному архиву для чата (только tracked-файлы через git archive; архивы с __pycache__/pyc считаются неверным входом).
 
 ### Fixed
+
+- Docs: гигиена и согласованность (CHATLOG актуальность, OPS лимиты getFile 20MB, перенос штампа в PACK_APPLY_TEMPLATE, ссылки ADR-002)
 - Миграции SQLite: идемпотентный раннер больше не ломает `CREATE TRIGGER ... BEGIN ... END;` и умеет исполнять несколько операторов в одной строке.
 - Worker: ретраи/backoff для Telegram/Yandex (tenacity, уважение RetryAfter), включая send_document (upload и cached file_id) и stream_download.
 - Ops: init-app-data сделан one-shot и bot/worker ждут его завершения (исключены падения SQLite WAL из-за прав на /data).
